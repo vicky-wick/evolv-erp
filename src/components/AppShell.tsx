@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { Mark } from "./Mark";
+import { ThemeToggle } from "./ThemeToggle";
 import { modules } from "../data/modules";
 import { useStore } from "../data/store";
 import { canAccess } from "../lib/calc";
@@ -40,11 +41,14 @@ export default function AppShell() {
   return (
     <div className="shell">
       <aside className="shell-side">
-        <Link to="/" className="brand shell-brand">
-          <Mark size={26} />
-          <span className="brand-name">Evolve</span>
-          <span className="brand-chip">ERP</span>
-        </Link>
+        <div className="shell-brand-row">
+          <Link to="/" className="brand shell-brand">
+            <Mark size={26} />
+            <span className="brand-name">Evolve</span>
+            <span className="brand-chip">ERP</span>
+          </Link>
+          <ThemeToggle className="theme-toggle-sm" />
+        </div>
 
         <nav className="shell-nav">
           {navItems.map((item) => (

@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -22,53 +21,41 @@ function guarded(module: ModuleId, element: ReactNode) {
   return <ModuleGuard module={module}>{element}</ModuleGuard>;
 }
 
-function AnimatedRoutes() {
-  const location = useLocation();
-
+function AppRoutes() {
   return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        key={location.pathname}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.18, ease: "easeOut" }}
+    <Routes>
+      <Route path="/" element={<Landing />} />
+      <Route path="/login" element={<Login />} />
+      <Route
+        path="/app"
+        element={
+          <ProtectedRoute>
+            <AppShell />
+          </ProtectedRoute>
+        }
       >
-        <Routes location={location}>
-          <Route path="/" element={<Landing />} />
-          <Route path="/login" element={<Login />} />
-          <Route
-            path="/app"
-            element={
-              <ProtectedRoute>
-                <AppShell />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Navigate to="/app/dashboard" replace />} />
-            <Route path="dashboard" element={guarded("dashboard", <Dashboard />)} />
-            <Route path="hr" element={guarded("hr", <HR />)} />
-            <Route path="attendance" element={guarded("attendance", <Attendance />)} />
-            <Route path="projects" element={guarded("projects", <Projects />)} />
-            <Route path="tasks" element={guarded("tasks", <Tasks />)} />
-            <Route path="payroll" element={guarded("payroll", <Payroll />)} />
-            <Route path="finance" element={guarded("finance", <Finance />)} />
-            <Route path="assets" element={guarded("assets", <Assets />)} />
-            <Route path="approvals" element={guarded("approvals", <Approvals />)} />
-            <Route path="reports" element={guarded("reports", <Reports />)} />
-            <Route path="settings" element={guarded("settings", <SettingsPage />)} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </motion.div>
-    </AnimatePresence>
+        <Route index element={<Navigate to="/app/dashboard" replace />} />
+        <Route path="dashboard" element={guarded("dashboard", <Dashboard />)} />
+        <Route path="hr" element={guarded("hr", <HR />)} />
+        <Route path="attendance" element={guarded("attendance", <Attendance />)} />
+        <Route path="projects" element={guarded("projects", <Projects />)} />
+        <Route path="tasks" element={guarded("tasks", <Tasks />)} />
+        <Route path="payroll" element={guarded("payroll", <Payroll />)} />
+        <Route path="finance" element={guarded("finance", <Finance />)} />
+        <Route path="assets" element={guarded("assets", <Assets />)} />
+        <Route path="approvals" element={guarded("approvals", <Approvals />)} />
+        <Route path="reports" element={guarded("reports", <Reports />)} />
+        <Route path="settings" element={guarded("settings", <SettingsPage />)} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
 
 export default function App() {
   return (
     <BrowserRouter>
-      <AnimatedRoutes />
+      <AppRoutes />
     </BrowserRouter>
   );
 }

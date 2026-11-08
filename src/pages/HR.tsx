@@ -40,17 +40,16 @@ function printIdCard(emp: Employee, dept?: string, manager?: string) {
   if (!w) return;
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>ID Card — ${emp.name}</title>
   <style>
-    body{font-family:Inter,Arial,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#111}
-    .card{width:340px;height:540px;border-radius:20px;background:linear-gradient(160deg,#0b0f08,#141a0f 55%,#0b0b0e);color:#f4f4f5;padding:28px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:space-between;border:1px solid #2b3a1a;position:relative;overflow:hidden}
-    .card:after{content:"";position:absolute;width:260px;height:260px;border-radius:50%;background:rgba(185,242,76,.14);filter:blur(50px);top:-80px;right:-80px}
-    .brand{font-size:13px;letter-spacing:.22em;text-transform:uppercase;color:#b9f24c;display:flex;justify-content:space-between;align-items:center}
-    .brand span{color:#7c7c88;letter-spacing:.08em}
-    .avatar{width:96px;height:96px;border-radius:24px;background:#1b2410;border:1px solid #3d5220;display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:600;color:#d7f79a;margin-top:36px}
+    body{font-family:Inter,Arial,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#f5f5f5}
+    .card{width:340px;height:540px;border-radius:20px;background:#101010;color:#ffffff;padding:28px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:space-between;border:1px solid rgba(255,255,255,.12);position:relative;overflow:hidden}
+    .brand{font-size:13px;letter-spacing:.22em;text-transform:uppercase;color:#ffffff;display:flex;justify-content:space-between;align-items:center}
+    .brand span{color:#a1a1aa;letter-spacing:.08em}
+    .avatar{width:96px;height:96px;border-radius:24px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:600;color:#ffffff;margin-top:36px}
     h1{font-size:24px;margin:18px 0 2px;letter-spacing:-.02em}
-    .role{font-size:12px;color:#b9f24c;letter-spacing:.12em;text-transform:uppercase}
-    .meta{margin-top:24px;display:grid;gap:10px;font-size:12px;color:#b3b3bd}
-    .meta b{display:block;color:#6f6f7a;font-size:9px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:2px}
-    .foot{font-size:10px;color:#5d5d68;border-top:1px solid #24241c;padding-top:14px;display:flex;justify-content:space-between}
+    .role{font-size:12px;color:#a1a1aa;letter-spacing:.12em;text-transform:uppercase}
+    .meta{margin-top:24px;display:grid;gap:10px;font-size:12px;color:#d4d4d8}
+    .meta b{display:block;color:#8b8b95;font-size:9px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:2px}
+    .foot{font-size:10px;color:#8b8b95;border-top:1px solid rgba(255,255,255,.1);padding-top:14px;display:flex;justify-content:space-between}
     @media print{body{background:#fff} .card{box-shadow:none}}
   </style></head><body>
   <div class="card">

@@ -1,13 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { motion } from "framer-motion";
 import { ArrowLeft, ArrowRight, Loader2, Lock, Mail } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { Mark } from "../components/Mark";
+import { ThemeToggle } from "../components/ThemeToggle";
 import { Avatar } from "../components/ui";
 import { useStore } from "../data/store";
 import { fmtDate } from "../lib/format";
-
-const ease: [number, number, number, number] = [0.22, 1, 0.36, 1];
+import "./Login.css";
 
 const roleLabel: Record<string, string> = {
   admin: "Administrator",
@@ -65,16 +64,14 @@ export default function Login() {
     <div className="login-page">
       <div className="login-bg" aria-hidden="true" />
 
-      <motion.div
-        className="login-wrap login-wrap-wide"
-        initial={{ opacity: 0, y: 16, scale: 0.99 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.5, ease }}
-      >
-        <Link to="/" className="login-back">
-          <ArrowLeft size={14} />
-          Back to site
-        </Link>
+      <div className="login-wrap login-wrap-wide">
+        <div className="login-top">
+          <Link to="/" className="login-back">
+            <ArrowLeft size={14} />
+            Back to site
+          </Link>
+          <ThemeToggle />
+        </div>
 
         <div className="login-grid">
           <div className="login-card">
@@ -112,14 +109,9 @@ export default function Login() {
               </label>
 
               {error && (
-                <motion.p
-                  className="form-error"
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  role="alert"
-                >
+                <p className="form-error" role="alert">
                   {error}
-                </motion.p>
+                </p>
               )}
 
               <button type="submit" className="btn btn-primary login-submit" disabled={loading}>
@@ -164,7 +156,7 @@ export default function Login() {
         </div>
 
         <p className="login-foot">Internal system · Evolve Creative Agency</p>
-      </motion.div>
+      </div>
     </div>
   );
 }
