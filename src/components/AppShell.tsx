@@ -1,14 +1,16 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ChevronDown,
   LogOut,
+  Menu,
   Settings2,
   CheckCircle2,
   Info,
+  X,
   XCircle,
 } from "lucide-react";
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Mark } from "./Mark";
 import { ThemeToggle } from "./ThemeToggle";
 import { modules } from "../data/modules";
@@ -27,7 +29,62 @@ const roleLabel: Record<string, string> = {
 export default function AppShell() {
   const { db, user, actions, toasts } = useStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+
+  useEffect(() => {
+    setNavOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (wasOpen.current && !navOpen) menuBtnRef.current?.focus();
+    wasOpen.current = navOpen;
+  }, [navOpen]);
+
+  useEffect(() => {
+    if (!navOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setNavOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+
+    return () => {
+      document.body.style.overflow = previous;
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [navOpen]);
+
+  /* Give tables column labels so they can stack into cards on phones. */
+  useEffect(() => {
+    const root = document.querySelector(".shell-main");
+    if (!root) return;
+
+    const annotate = () => {
+      root.querySelectorAll<HTMLTableElement>(".table-wrap table").forEach((table) => {
+        const labels = Array.from(table.querySelectorAll("thead th")).map((th) =>
+          (th.textContent ?? "").replace(/\s+/g, " ").trim()
+        );
+        table.querySelectorAll<HTMLTableRowElement>("tbody tr").forEach((row) => {
+          Array.from(row.children).forEach((cell, index) => {
+            if (cell instanceof HTMLElement) cell.dataset.label = labels[index] ?? "";
+          });
+        });
+      });
+    };
+
+    annotate();
+    const observer = new MutationObserver(annotate);
+    observer.observe(root, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [location.pathname]);
 
   if (!user) return null;
 
@@ -39,8 +96,45 @@ export default function AppShell() {
   const demoAccounts = db.employees.filter((e) => e.status !== "exited");
 
   return (
-    <div className="shell">
-      <aside className="shell-side">
+    <div className={`shell${navOpen ? " nav-open" : ""}`}>
+      <header className="shell-topbar">
+        <button
+          ref={menuBtnRef}
+          className="shell-menu-btn"
+          aria-label="Open navigation"
+          aria-controls="shell-nav"
+          aria-expanded={navOpen}
+          onClick={() => setNavOpen(true)}
+        >
+          <Menu size={20} />
+        </button>
+
+        <Link to="/app/dashboard" className="shell-topbar-brand" aria-label="Evolve ERP dashboard">
+          <Mark size={24} />
+          <span>Evolve</span>
+        </Link>
+
+        <div className="shell-topbar-actions">
+          <ThemeToggle className="theme-toggle-sm" />
+          <button
+            className="shell-topbar-avatar"
+            aria-label="Open navigation and account menu"
+            onClick={() => setNavOpen(true)}
+          >
+            <Avatar name={user.name} size={30} />
+          </button>
+        </div>
+      </header>
+
+      <button
+        className="shell-scrim"
+        aria-label="Close navigation"
+        aria-hidden={!navOpen}
+        tabIndex={navOpen ? 0 : -1}
+        onClick={() => setNavOpen(false)}
+      />
+
+      <aside id="shell-nav" className="shell-side">
         <div className="shell-brand-row">
           <Link to="/" className="brand shell-brand">
             <Mark size={26} />
@@ -48,6 +142,14 @@ export default function AppShell() {
             <span className="brand-chip">ERP</span>
           </Link>
           <ThemeToggle className="theme-toggle-sm" />
+          <button
+            ref={closeRef}
+            className="shell-drawer-close"
+            aria-label="Close navigation"
+            onClick={() => setNavOpen(false)}
+          >
+            <X size={18} />
+          </button>
         </div>
 
         <nav className="shell-nav">
@@ -55,6 +157,7 @@ export default function AppShell() {
             <NavLink
               key={item.id}
               to={`/app/${item.id}`}
+              onClick={() => setNavOpen(false)}
               className={({ isActive }) => `shell-nav-item${isActive ? " active" : ""}`}
             >
               <item.icon size={16} strokeWidth={1.8} />
@@ -93,6 +196,7 @@ export default function AppShell() {
                       onClick={() => {
                         actions.switchUser(emp.id);
                         setMenuOpen(false);
+                        setNavOpen(false);
                         navigate("/app/dashboard");
                       }}
                     >
@@ -108,6 +212,7 @@ export default function AppShell() {
                   className="user-menu-signout"
                   onClick={() => {
                     actions.logout();
+                    setNavOpen(false);
                     navigate("/login", { replace: true });
                   }}
                 >

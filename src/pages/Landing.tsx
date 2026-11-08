@@ -23,9 +23,11 @@ import {
   Fingerprint,
   IndianRupee,
   LockKeyhole,
+  Menu,
   ShieldCheck,
   Sparkles,
   Users,
+  X,
   Zap,
 } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -284,6 +286,7 @@ export default function Landing() {
   const reduce = useReducedMotion();
   const { theme } = useTheme();
   const [scrolled, setScrolled] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [activeFlow, setActiveFlow] = useState(0);
   const [activeRole, setActiveRole] = useState(2);
 
@@ -296,6 +299,22 @@ export default function Landing() {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileOpen(false);
+    };
+    const onResize = () => {
+      if (window.innerWidth > 980) setMobileOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [mobileOpen]);
 
   const workflow = workflows[activeFlow];
   const copy = workflowCopy[workflow.name] ?? {
@@ -333,8 +352,50 @@ export default function Landing() {
               Sign in
               <ArrowUpRight size={15} />
             </Link>
+            <button
+              className="nav-menu-btn"
+              aria-label={mobileOpen ? "Close menu" : "Open menu"}
+              aria-expanded={mobileOpen}
+              aria-controls="site-menu"
+              onClick={() => setMobileOpen((open) => !open)}
+            >
+              {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
           </div>
         </div>
+
+        {mobileOpen && (
+          <motion.nav
+            id="site-menu"
+            className="nav-mobile"
+            aria-label="Sections"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, ease }}
+          >
+            {[
+              ["#platform", "Platform"],
+              ["#modules", "Modules"],
+              ["#workflows", "Workflows"],
+              ["#payroll", "Payroll"],
+              ["#roles", "Roles"],
+            ].map(([href, label]) => (
+              <a key={href} href={href} onClick={() => setMobileOpen(false)}>
+                {label}
+                <ArrowUpRight size={15} />
+              </a>
+            ))}
+            <a
+              href="https://github.com/vicky-wick/evolv-erp"
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => setMobileOpen(false)}
+            >
+              GitHub
+              <ArrowUpRight size={15} />
+            </a>
+          </motion.nav>
+        )}
       </header>
 
       <main>

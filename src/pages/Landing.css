@@ -105,6 +105,57 @@
   color: var(--text);
 }
 
+.nav-menu-btn {
+  display: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  transition: background 0.2s ease;
+}
+
+.nav-menu-btn:hover {
+  background: var(--surface);
+}
+
+.nav-mobile {
+  display: none;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  padding: 4px 20px 16px;
+  box-shadow: 0 24px 40px -30px rgba(0, 0, 0, 0.35);
+}
+
+.nav-mobile a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 50px;
+  padding: 0 2px;
+  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+  font-weight: 450;
+  color: var(--text-muted);
+}
+
+.nav-mobile a:last-child {
+  border-bottom: none;
+}
+
+.nav-mobile a:hover,
+.nav-mobile a:active {
+  color: var(--text);
+}
+
+.nav-mobile a svg {
+  color: var(--text-faint);
+}
+
 .btn-lg {
   height: 46px;
   padding: 0 22px;
@@ -2381,6 +2432,18 @@
     display: none;
   }
 
+  .nav-menu-btn {
+    display: inline-grid;
+  }
+
+  .nav-mobile {
+    display: grid;
+  }
+
+  .nav-actions {
+    gap: 10px;
+  }
+
   .hero {
     padding-top: 126px;
   }
@@ -2509,10 +2572,15 @@
 
   .nav-inner {
     height: 62px;
+    gap: 12px;
   }
 
   .nav-repo {
     display: none;
+  }
+
+  .nav-actions {
+    gap: 8px;
   }
 
   .hero {
@@ -2520,7 +2588,7 @@
   }
 
   .hero h1 {
-    font-size: clamp(40px, 10.5vw, 56px);
+    font-size: clamp(37px, 11vw, 54px);
   }
 
   .hero-sub {
@@ -2708,9 +2776,17 @@
     height: 320px;
   }
 
-  .hero-actions .btn {
-    flex: 1;
-    min-width: 150px;
+  .hero-actions,
+  .cta-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hero-actions .btn,
+  .cta-actions .btn {
+    width: 100%;
+    min-width: 0;
+    flex: none;
   }
 
   .hero-stats {
@@ -2775,17 +2851,26 @@
     font-size: clamp(30px, 9vw, 40px);
   }
 
-  .cta-actions .btn {
-    flex: 1;
-    min-width: 150px;
-  }
-
   .footer-top {
     grid-template-columns: 1fr;
   }
 
+  .footer {
+    padding-bottom: calc(26px + env(safe-area-inset-bottom));
+  }
+
   .footer-col:last-child {
     display: none;
+  }
+}
+
+@media (max-width: 380px) {
+  .nav-inner .brand-chip {
+    display: none;
+  }
+
+  .nav-actions .btn-sm {
+    padding: 0 11px;
   }
 }
 
