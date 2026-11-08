@@ -38,7 +38,7 @@
   height: 100vh;
   height: 100dvh;
   padding: 20px 14px 16px;
-  background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg) 100%);
+  background: var(--bg-2);
   border-right: 1px solid var(--border);
 }
 
@@ -308,18 +308,6 @@
   width: 100%;
   max-width: 1320px;
   margin: 0 auto;
-  animation: page-in 0.32s ease both;
-}
-
-@keyframes page-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
 }
 
 .page-header {
@@ -366,8 +354,8 @@
   padding: 18px 20px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
+  border-radius: 12px;
+  box-shadow: none;
 }
 
 .panel-head {
@@ -452,18 +440,10 @@
   flex-direction: column;
   gap: 4px;
   padding: 15px 16px;
-  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 10px;
   overflow: hidden;
-}
-
-.stat::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(120px 70px at 100% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 70%);
-  pointer-events: none;
 }
 
 .stat-click {
@@ -1238,9 +1218,7 @@
   justify-content: center;
   padding: 48px 20px;
   overflow-y: auto;
-  background: color-mix(in srgb, #000 55%, transparent);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: color-mix(in srgb, #000 50%, transparent);
 }
 
 .modal {
@@ -1375,16 +1353,16 @@
 }
 
 .progress-lime {
-  background: linear-gradient(90deg, var(--accent), var(--accent));
+  background: var(--accent);
 }
 .progress-blue {
-  background: linear-gradient(90deg, var(--brand), var(--blue));
+  background: var(--brand);
 }
 .progress-amber {
-  background: linear-gradient(90deg, var(--warning), var(--amber));
+  background: var(--warning);
 }
 .progress-red {
-  background: linear-gradient(90deg, var(--danger), var(--red));
+  background: var(--danger);
 }
 
 /* ---------------- Charts ---------------- */
@@ -1455,11 +1433,11 @@
 }
 
 .bar-income {
-  background: linear-gradient(180deg, var(--brand), color-mix(in srgb, var(--brand) 35%, transparent));
+  background: var(--brand);
 }
 
 .bar-expense {
-  background: linear-gradient(180deg, var(--border-strong), transparent);
+  background: var(--border-strong);
 }
 
 .chart-label {
@@ -1493,7 +1471,7 @@
   max-width: 26px;
   min-height: 4px;
   border-radius: 4px 4px 2px 2px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 80%, transparent), color-mix(in srgb, var(--accent) 18%, transparent));
+  background: var(--accent);
   transition: height 0.4s ease;
 }
 
@@ -1569,9 +1547,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 22px;
-  background:
-    radial-gradient(360px 140px at 0% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%),
-    linear-gradient(180deg, var(--surface-2), var(--surface));
+  background: var(--surface);
 }
 
 .myday-main {
@@ -1672,21 +1648,7 @@
 }
 
 .live-dot.on {
-  background: var(--accent);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
-  animation: live-pulse 2s infinite;
-}
-
-@keyframes live-pulse {
-  0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent);
-  }
-  70% {
-    box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 0%, transparent);
-  }
-  100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
-  }
+  background: var(--success);
 }
 
 .dash-grid {
@@ -1962,9 +1924,9 @@
   gap: 3px;
   align-items: flex-start;
   padding: 13px 15px;
-  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 10px;
 }
 
 .leave-card > span {
@@ -2165,16 +2127,14 @@
   gap: 9px;
   padding: 18px;
   text-align: left;
-  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 15px;
-  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  border-radius: 12px;
+  transition: border-color 0.15s ease;
 }
 
 .project-card:hover {
-  transform: translateY(-2px);
   border-color: var(--border-strong);
-  background: linear-gradient(180deg, var(--surface-2), var(--surface));
 }
 
 .project-card-top {
@@ -2422,14 +2382,13 @@
   gap: 8px;
   padding: 16px;
   text-align: left;
-  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  transition: transform 0.2s ease, border-color 0.2s ease;
+  border-radius: 10px;
+  transition: border-color 0.15s ease;
 }
 
 .task-card:hover {
-  transform: translateY(-2px);
   border-color: var(--border-strong);
 }
 
@@ -2877,7 +2836,7 @@
   height: 100%;
   min-width: 3px;
   border-radius: 999px;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 45%, transparent), var(--accent));
+  background: var(--accent);
   transition: width 0.4s ease;
 }
 
@@ -3489,9 +3448,7 @@
     gap: 8px;
     height: calc(56px + env(safe-area-inset-top));
     padding: env(safe-area-inset-top) 12px 0;
-    background: color-mix(in srgb, var(--bg) 88%, transparent);
-    -webkit-backdrop-filter: saturate(160%) blur(16px);
-    backdrop-filter: saturate(160%) blur(16px);
+    background: var(--bg);
     border-bottom: 1px solid var(--border);
   }
 

@@ -1,4 +1,3 @@
-import { motion, useReducedMotion } from "framer-motion";
 import { Bell, Check, Search } from "lucide-react";
 import { modules } from "../../data/modules";
 
@@ -18,7 +17,6 @@ const approvals = [
 ];
 
 export default function AppPreview() {
-  const reduce = useReducedMotion();
   const navItems = modules.slice(0, 9);
 
   return (
@@ -66,7 +64,7 @@ export default function AppPreview() {
         <div className="preview-main">
           <header className="preview-head">
             <div>
-              <h3>Good morning, Aarav</h3>
+              <p className="preview-greeting">Good morning, Aarav</p>
               <p>Monday, 9 November 2026 · here is where the agency stands.</p>
             </div>
             <div className="preview-head-tools" aria-hidden="true">
@@ -114,12 +112,8 @@ export default function AppPreview() {
               <div className="preview-bars">
                 {payrollBars.map((bar, index) => (
                   <div className="preview-bar-col" key={bar.month}>
-                    <motion.i
+                    <i
                       className={index === payrollBars.length - 1 ? "is-last" : ""}
-                      initial={reduce ? false : { scaleY: 0 }}
-                      whileInView={{ scaleY: 1 }}
-                      viewport={{ once: true, margin: "-40px" }}
-                      transition={{ duration: 0.7, delay: index * 0.06, ease: [0.22, 1, 0.36, 1] }}
                       style={{ height: `${bar.value}%` }}
                     />
                     <span>{bar.month}</span>
