@@ -581,8 +581,13 @@ export async function createOrganization(
     .insert({ user_id: userId, org_id: orgId });
   if (memberRes.error) throw new Error(memberRes.error.message);
 
+  /* Unique ids per org — shared hardcoded ids would collide with rows from
+     other organizations and make the insert violate RLS. */
+  const adminId = uid("emp");
+  const deptId = uid("dept");
+
   const admin: Row = {
-    id: uid("emp"),
+    id: adminId,
     org_id: orgId,
     code: "EV-001",
     name: input.adminName.trim(),
@@ -592,7 +597,7 @@ export async function createOrganization(
     address: "",
     joining_date: todayISO(),
     employment_type: "full-time",
-    department_id: "dept-general",
+    department_id: deptId,
     designation: "Administrator",
     manager_id: null,
     role: "admin",
@@ -608,15 +613,15 @@ export async function createOrganization(
   };
 
   const dept: Row = {
-    id: "dept-general",
+    id: deptId,
     org_id: orgId,
     name: "General",
-    head_id: admin.id as string,
+    head_id: adminId,
   };
 
-  const res = await client.from("employees").upsert([admin]);
+  const res = await client.from("employees").insert([admin]);
   if (res.error) throw new Error(res.error.message);
-  const deptRes = await client.from("departments").upsert([dept]);
+  const deptRes = await client.from("departments").insert([dept]);
   if (deptRes.error) throw new Error(deptRes.error.message);
 
   return orgId;
