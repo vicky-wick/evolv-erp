@@ -27,7 +27,7 @@ const roleLabel: Record<string, string> = {
 };
 
 export default function AppShell() {
-  const { db, user, actions, toasts } = useStore();
+  const { db, user, actions, toasts, authMode } = useStore();
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -166,7 +166,11 @@ export default function AppShell() {
           ))}
         </nav>
 
-        <div className="shell-demo-note">Demo workspace · data stays in this browser</div>
+        <div className="shell-demo-note">
+          {authMode === "demo"
+            ? "Demo workspace · data stays in this browser"
+            : "Internal workspace · data stays in this browser"}
+        </div>
 
         <div className="shell-user-wrap">
           <button className="shell-user" onClick={() => setMenuOpen((o) => !o)}>
@@ -187,27 +191,31 @@ export default function AppShell() {
                 exit={{ opacity: 0, y: 4, scale: 0.98 }}
                 transition={{ duration: 0.16 }}
               >
-                <div className="user-menu-label">Switch demo account</div>
-                <div className="user-menu-list">
-                  {demoAccounts.map((emp) => (
-                    <button
-                      key={emp.id}
-                      className={`user-menu-item${emp.id === user.id ? " current" : ""}`}
-                      onClick={() => {
-                        actions.switchUser(emp.id);
-                        setMenuOpen(false);
-                        setNavOpen(false);
-                        navigate("/app/dashboard");
-                      }}
-                    >
-                      <Avatar name={emp.name} size={24} />
-                      <span>
-                        <strong>{emp.name}</strong>
-                        <small>{roleLabel[emp.role]}</small>
-                      </span>
-                    </button>
-                  ))}
-                </div>
+                {authMode === "demo" && (
+                  <>
+                    <div className="user-menu-label">Switch demo account</div>
+                    <div className="user-menu-list">
+                      {demoAccounts.map((emp) => (
+                        <button
+                          key={emp.id}
+                          className={`user-menu-item${emp.id === user.id ? " current" : ""}`}
+                          onClick={() => {
+                            actions.switchUser(emp.id);
+                            setMenuOpen(false);
+                            setNavOpen(false);
+                            navigate("/app/dashboard");
+                          }}
+                        >
+                          <Avatar name={emp.name} size={24} />
+                          <span>
+                            <strong>{emp.name}</strong>
+                            <small>{roleLabel[emp.role]}</small>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
                 <button
                   className="user-menu-signout"
                   onClick={() => {

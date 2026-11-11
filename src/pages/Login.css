@@ -67,6 +67,10 @@
   align-items: stretch;
 }
 
+.login-grid-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 /* ---------- auth card ---------- */
 .login-card {
   display: flex;
@@ -187,6 +191,18 @@
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 10.8px;
+}
+
+.login-hint-auth {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.login-hint-auth svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--text-muted);
 }
 
 /* ---------- demo accounts ---------- */

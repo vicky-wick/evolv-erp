@@ -48,6 +48,7 @@ import {
   todayISO,
   uid,
 } from "../lib/format";
+import { authErrorMessage, getSupabase, isSupabaseConfigured } from "../lib/supabase";
 
 const DB_KEY = "evolve.erp.db.v1";
 
@@ -85,10 +86,18 @@ function mergeSettings(base: Settings, patch: DeepPartial<Settings>): Settings {
   return next;
 }
 
+export type AuthMode = "supabase" | "demo";
+
+export interface AuthResult {
+  ok: boolean;
+  error?: string;
+}
+
 export interface StoreActions {
-  login: (email: string, password: string) => boolean;
+  login: (email: string, password: string) => Promise<AuthResult>;
   logout: () => void;
   switchUser: (employeeId: string) => void;
+  clearAuthError: () => void;
 
   /* attendance */
   checkIn: () => void;
@@ -238,6 +247,9 @@ interface StoreCtx {
   user: Employee | null;
   actions: StoreActions;
   toasts: Toast[];
+  authMode: AuthMode;
+  authReady: boolean;
+  authError: string | null;
 }
 
 const Ctx = createContext<StoreCtx | null>(null);
@@ -288,6 +300,94 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4200);
     timers.current.push(timer);
+  }, []);
+
+  /* ---------------- Supabase session ---------------- */
+  const [authReady, setAuthReady] = useState(() => !isSupabaseConfigured);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const dbRef = useRef(db);
+
+  useEffect(() => {
+    dbRef.current = db;
+  }, [db]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setAuthReady(true);
+      return;
+    }
+
+    let active = true;
+    let unsubscribe: (() => void) | null = null;
+
+    const start = async () => {
+      try {
+        const client = await getSupabase();
+        if (!active) return;
+        if (!client) {
+          setAuthReady(true);
+          return;
+        }
+
+        const applySession = (email: string | null) => {
+          if (!active) return;
+          const normalized = (email ?? "").trim().toLowerCase();
+          const employee = normalized
+            ? dbRef.current.employees.find(
+                (e) => e.email.toLowerCase() === normalized && e.status !== "exited"
+              )
+            : undefined;
+
+          if (normalized && !employee) {
+            setAuthError(
+              "This account is not linked to an employee record. Ask an administrator to add your email."
+            );
+            /* Defer sign-out: auth calls made inside the callback can deadlock. */
+            window.setTimeout(() => {
+              void client.auth.signOut({ scope: "local" });
+            }, 0);
+          } else {
+            setAuthError(null);
+          }
+
+          const nextId = employee?.id ?? null;
+          setDb((prev) =>
+            prev.sessionEmployeeId === nextId ? prev : { ...prev, sessionEmployeeId: nextId }
+          );
+        };
+
+        const { data: listener } = client.auth.onAuthStateChange((event, session) => {
+          if (!active) return;
+          if (event === "INITIAL_SESSION") return;
+          if (event === "SIGNED_OUT") {
+            setDb((prev) =>
+              prev.sessionEmployeeId === null ? prev : { ...prev, sessionEmployeeId: null }
+            );
+            return;
+          }
+          applySession(session?.user.email ?? null);
+        });
+        unsubscribe = () => listener.subscription.unsubscribe();
+
+        const { data } = await client.auth.getSession();
+        applySession(data.session?.user.email ?? null);
+      } catch {
+        if (active) {
+          setDb((prev) =>
+            prev.sessionEmployeeId === null ? prev : { ...prev, sessionEmployeeId: null }
+          );
+        }
+      } finally {
+        if (active) setAuthReady(true);
+      }
+    };
+
+    void start();
+
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
   }, []);
 
   const user = useMemo(
@@ -345,36 +445,77 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     return {
       /* ---------------- auth ---------------- */
-      login(email, password) {
+      clearAuthError() {
+        setAuthError(null);
+      },
+
+      async login(email, password) {
+        setAuthError(null);
         const emp = db.employees.find(
           (e) => e.email.toLowerCase() === email.trim().toLowerCase()
         );
         if (!emp) {
-          toast("No employee account found for that email.", "error");
-          return false;
+          return { ok: false, error: "No employee account found for that email." };
         }
         if (emp.status === "exited") {
-          toast("This account has been deactivated.", "error");
-          return false;
+          return { ok: false, error: "This account has been deactivated." };
         }
+
+        if (isSupabaseConfigured) {
+          try {
+            const client = await getSupabase();
+            if (!client) {
+              return { ok: false, error: "Supabase authentication is unavailable." };
+            }
+            const { error } = await client.auth.signInWithPassword({
+              email: emp.email,
+              password,
+            });
+            if (error) {
+              return { ok: false, error: authErrorMessage(error) };
+            }
+          } catch (error) {
+            return { ok: false, error: authErrorMessage(error) };
+          }
+          mutate((draft) => {
+            draft.sessionEmployeeId = emp.id;
+          });
+          toast(`Signed in as ${emp.name}.`);
+          return { ok: true };
+        }
+
         if (password !== "evolve") {
-          toast("Incorrect password. Demo password is “evolve”.", "error");
-          return false;
+          return {
+            ok: false,
+            error: "Incorrect password. Demo password is “evolve”.",
+          };
         }
         mutate((draft) => {
           draft.sessionEmployeeId = emp.id;
         });
         toast(`Signed in as ${emp.name}.`);
-        return true;
+        return { ok: true };
       },
 
       logout() {
+        setAuthError(null);
         mutate((draft) => {
           draft.sessionEmployeeId = null;
         });
+        if (isSupabaseConfigured) {
+          void getSupabase()
+            .then((client) => client?.auth.signOut({ scope: "local" }))
+            .catch(() => {
+              /* Local session is already cleared. */
+            });
+        }
       },
 
       switchUser(employeeId) {
+        if (isSupabaseConfigured) {
+          toast("Account switching is only available in demo mode.", "error");
+          return;
+        }
         const emp = db.employees.find((e) => e.id === employeeId);
         if (!emp) return;
         mutate((draft) => {
@@ -1368,15 +1509,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
 
       resetDemo() {
-        const fresh = buildSeedDB();
-        setDb(fresh);
+        setDb((prev) => {
+          const fresh = buildSeedDB();
+          fresh.sessionEmployeeId = prev.sessionEmployeeId;
+          return fresh;
+        });
         toast("Demo data reset to a fresh state.", "info");
       },
     };
   }, [db, user, mutate, toast]);
 
   return (
-    <Ctx.Provider value={{ db, user, actions, toasts }}>{children}</Ctx.Provider>
+    <Ctx.Provider
+      value={{
+        db,
+        user,
+        actions,
+        toasts,
+        authMode: isSupabaseConfigured ? "supabase" : "demo",
+        authReady,
+        authError,
+      }}
+    >
+      {children}
+    </Ctx.Provider>
   );
 }
 
