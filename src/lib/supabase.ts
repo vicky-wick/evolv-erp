@@ -58,7 +58,23 @@ export function authErrorMessage(error: unknown): string {
   if (lower.includes("email not confirmed")) {
     return "Confirm your email address before signing in.";
   }
-  if (lower.includes("too many requests") || lower.includes("rate limit")) {
+  if (
+    lower.includes("over_email_send_rate_limit") ||
+    lower.includes("email rate limit")
+  ) {
+    return "Supabase's built-in email service has a small hourly limit and it's used up. Wait about an hour, or turn off \"Confirm email\" under Authentication → Sign In / Providers in the Supabase dashboard.";
+  }
+  if (lower.includes("email_address_not_authorized")) {
+    return "Supabase's built-in email service only sends to your organization's team member addresses. Use a team email or set up custom SMTP in the Supabase dashboard.";
+  }
+  if (lower.includes("user already registered")) {
+    return "An account already exists for that email. Try signing in instead, or reset your password.";
+  }
+  if (
+    lower.includes("too many requests") ||
+    lower.includes("over_request_rate_limit") ||
+    lower.includes("rate limit")
+  ) {
     return "Too many attempts. Please wait a minute and try again.";
   }
   if (
