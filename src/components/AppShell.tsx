@@ -27,7 +27,7 @@ const roleLabel: Record<string, string> = {
 };
 
 export default function AppShell() {
-  const { db, user, actions, toasts, authMode } = useStore();
+  const { db, user, actions, toasts, authMode, syncState, orgs, activeOrgId } = useStore();
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -167,9 +167,27 @@ export default function AppShell() {
         </nav>
 
         <div className="shell-demo-note">
-          {authMode === "demo"
-            ? "Demo workspace · data stays in this browser"
-            : "Internal workspace · data stays in this browser"}
+          {authMode === "demo" ? (
+            "Demo workspace · data stays in this browser"
+          ) : syncState.status === "saving" ? (
+            <>
+              <span className="sync-dot sync-saving" aria-hidden="true" /> Saving changes…
+            </>
+          ) : syncState.status === "error" ? (
+            <button
+              type="button"
+              className="sync-retry"
+              onClick={() => actions.retrySync()}
+              title={syncState.message}
+            >
+              <span className="sync-dot sync-error" aria-hidden="true" /> Sync failed — retry
+            </button>
+          ) : (
+            <>
+              <span className="sync-dot sync-saved" aria-hidden="true" /> Cloud synced
+              {syncState.at ? ` · ${new Date(syncState.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}
+            </>
+          )}
         </div>
 
         <div className="shell-user-wrap">
@@ -191,6 +209,33 @@ export default function AppShell() {
                 exit={{ opacity: 0, y: 4, scale: 0.98 }}
                 transition={{ duration: 0.16 }}
               >
+                {authMode === "supabase" && orgs.length > 1 && (
+                  <>
+                    <div className="user-menu-label">Switch organization</div>
+                    <div className="user-menu-list">
+                      {orgs.map((org) => (
+                        <button
+                          key={org.id}
+                          className={`user-menu-item${org.id === activeOrgId ? " current" : ""}`}
+                          onClick={() => {
+                            actions.switchOrg(org.id);
+                            setMenuOpen(false);
+                            setNavOpen(false);
+                            navigate("/app/dashboard");
+                          }}
+                        >
+                          <span className="org-swatch" aria-hidden="true">
+                            {org.name.slice(0, 1).toUpperCase()}
+                          </span>
+                          <span>
+                            <strong>{org.name}</strong>
+                            <small>Organization</small>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
                 {authMode === "demo" && (
                   <>
                     <div className="user-menu-label">Switch demo account</div>

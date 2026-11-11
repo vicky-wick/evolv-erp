@@ -2,7 +2,7 @@
 
 Internal service-agency ERP for **Evolve Creative Agency** — HR, attendance, projects, tasks, timesheets, payroll, finance, assets, approvals, documents and analytics in one app.
 
-Built with React 19, Vite 6, TypeScript, react-router and framer-motion. The ERP database runs entirely client-side and is seeded in `localStorage` under `evolve.erp.db.v1`. Sign-in can be handled by Supabase, with a local demo fallback when Supabase is not configured.
+Built with React 19, Vite 6, TypeScript, react-router and framer-motion, backed by **Supabase** (auth + Postgres with row-level security). Without Supabase configured the app falls back to a fully client-side demo persisted in `localStorage`.
 
 ## Getting started
 
@@ -18,34 +18,43 @@ npm run build     # type-check + production build
 npm run preview   # preview the production build
 ```
 
-## Supabase authentication
+## Backend (Supabase)
 
-The login screen uses Supabase Auth (email + password) when these environment variables are set:
+The app is a real multi-tenant system when these environment variables are set (copy `.env.example` to `.env`):
 
 ```bash
-# .env — copy .env.example
 VITE_SUPABASE_URL=https://your-project-ref.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-public-key
+VITE_SUPABASE_ANON_KEY=your-publishable-or-anon-key
 ```
 
-Setup:
+### Database
 
-1. Create a project at [supabase.com](https://supabase.com) and open **Project Settings → API**.
-2. Copy the project URL and the **anon public** key into `.env`.
-3. In **Authentication → Providers**, keep the **Email** provider enabled. Turn off public sign-ups if the workspace is invite-only.
-4. In **Authentication → Users**, create a user for each employee. The user's email must match the employee's email in the ERP directory (for example `aarav@evolve.agency`).
-5. Restart the dev server so Vite picks up the new environment variables.
+Every organization gets its own logically isolated data set. The normalized schema (migration `init_evolve_erp_schema` on the Supabase project) contains:
 
-With Supabase configured:
+- `organizations` — profile + settings (payroll rules, leave policies, holidays, thresholds as JSONB)
+- `org_members` — links auth users to organizations, drives all access
+- 15 business tables — `employees`, `departments`, `attendance`, `leave_requests`, `corrections`, `projects`, `tasks`, `timesheets`, `payroll_runs`, `expenses`, `incomes`, `accounts`, `assets`, `company_documents`, `salary_revisions`
 
-- Sign-in goes through `supabase.auth.signInWithPassword` and sessions persist/refresh automatically.
-- Only emails that already exist in the employee directory can open the workspace; unlinked accounts are signed out with an explanatory error.
-- Demo account switching is disabled, and the demo quick sign-in panel is hidden.
-- Signing out clears both the Supabase session and the local ERP session.
+All tables are protected by **row-level security**: a row is readable/writable only for members of the same organization (enforced through a `SECURITY DEFINER` membership check, which keeps the policies free of recursion). Realtime is enabled on every table so open clients refetch when teammates make changes.
+
+### How syncing works
+
+The ERP business logic is unchanged and still runs client-side. Every mutation produces a small **diff** against the last-synced snapshot which is pushed to Postgres (upserts + deletes, debounced ~700 ms and flushed when the tab is hidden). Incoming changes from teammates arrive over Supabase Realtime and are refetched into the app.
+
+### Provisioning an organization
+
+1. **Create a workspace** from the login screen (or `/onboarding` for an account without one). The first employee record (admin) is created from your account, and default payroll/leave settings are seeded.
+2. Add teammates in **HR** — the email they sign up with must match their employee record's email so the account links to the right person.
+
+### Demo organization
+
+The seeded demo org lives in the same database:
+
+- Organization: `Evolve Creative Agency`
+- Accounts: the five `@evolve.agency` emails below, password **`evolve`**
+- The full demo dataset (13 employees, attendance, projects, payroll, …) is uploaded on the first sign-in after the org is created or wiped.
 
 Without the environment variables the app stays in **demo mode** and the local `evolve` password keeps working.
-
-> Authentication is the only Supabase dependency. ERP records still live in the browser's `localStorage`, so this is not a multi-device database yet.
 
 ## Demo accounts
 
@@ -59,7 +68,7 @@ Password for every seeded account in demo mode: **`evolve`**
 | Manager | rahul@evolve.agency |
 | Employee | sneha@evolve.agency |
 
-The login screen also has one-click role buttons, and the in-app user menu can switch between the demo roles.
+In demo mode the login screen also has one-click role buttons, and the in-app user menu can switch between the demo roles.
 
 ## Modules
 
@@ -78,4 +87,4 @@ The login screen also has one-click role buttons, and the in-app user menu can s
 ## Notes
 
 - Statutory rates and approval thresholds are configurable in **Settings**, but any real payroll use should be validated with a payroll professional before production.
-- Demo data can be restored from **Settings → Data → Reset demo data**.
+- In demo mode, demo data can be restored from **Settings → Data → Reset demo data**.

@@ -18,7 +18,7 @@ import type { LeavePolicy } from "../types";
 import { currency, fmtDate, todayISO } from "../lib/format";
 
 export default function Settings() {
-  const { db, user, actions } = useStore();
+  const { db, user, actions, authMode, syncState } = useStore();
   const [tab, setTab] = useState("org");
 
   const [org, setOrg] = useState({ ...db.settings.org });
@@ -315,28 +315,45 @@ export default function Settings() {
         <>
           <section className="panel">
             <div className="panel-head">
-              <h2>Demo data</h2>
-              <span className="panel-hint">Stored locally in this browser</span>
+              <h2>{authMode === "supabase" ? "Cloud data" : "Demo data"}</h2>
+              <span className="panel-hint">
+                {authMode === "supabase" ? "Stored in Supabase Postgres" : "Stored locally in this browser"}
+              </span>
             </div>
             <p className="panel-empty" style={{ textAlign: "left", padding: "0 0 16px" }}>
-              This workspace is a fully client-side demo. All changes — attendance, approvals, payroll runs,
-              expenses, assets and documents — persist in <code>localStorage</code> under{" "}
-              <code>evolve.erp.db.v1</code>. Resetting restores the seeded agency with a fresh October payroll.
+              {authMode === "supabase" ? (
+                <>
+                  This workspace lives in a private Postgres database with row-level security.
+                  Changes sync automatically{" "}
+                  {syncState.status === "error"
+                    ? "— the last attempt failed; changes are kept locally and retried."
+                    : "across your whole team in real time."}{" "}
+                  The JSON backup below contains everything visible to your role.
+                </>
+              ) : (
+                <>
+                  This workspace is a fully client-side demo. All changes — attendance, approvals, payroll runs,
+                  expenses, assets and documents — persist in <code>localStorage</code> under{" "}
+                  <code>evolve.erp.db.v1</code>. Resetting restores the seeded agency with a fresh October payroll.
+                </>
+              )}
             </p>
             <div className="form-actions">
               <button className="btn btn-ghost btn-sm" onClick={downloadBackup}>
                 <Download size={14} /> Download JSON backup
               </button>
-              <button
-                className="btn btn-ghost btn-sm link-danger"
-                onClick={() => {
-                  if (window.confirm("Reset all demo data to the seeded state? This cannot be undone.")) {
-                    actions.resetDemo();
-                  }
-                }}
-              >
-                <Database size={14} /> Reset demo data
-              </button>
+              {authMode === "demo" && (
+                <button
+                  className="btn btn-ghost btn-sm link-danger"
+                  onClick={() => {
+                    if (window.confirm("Reset all demo data to the seeded state? This cannot be undone.")) {
+                      actions.resetDemo();
+                    }
+                  }}
+                >
+                  <Database size={14} /> Reset demo data
+                </button>
+              )}
             </div>
           </section>
 

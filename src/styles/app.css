@@ -112,6 +112,62 @@
   border-top: 1px solid var(--border);
 }
 
+.shell-demo-note .sync-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 999px;
+  vertical-align: 1px;
+}
+
+.shell-demo-note .sync-saved {
+  background: var(--success);
+}
+
+.shell-demo-note .sync-saving {
+  background: var(--warning, #f59e0b);
+  animation: sync-pulse 1.1s ease-in-out infinite;
+}
+
+.shell-demo-note .sync-error {
+  background: var(--danger);
+}
+
+.shell-demo-note .sync-retry {
+  display: inline;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--danger);
+  cursor: pointer;
+  text-align: left;
+}
+
+.shell-demo-note .sync-retry:hover {
+  text-decoration: underline;
+}
+
+@keyframes sync-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.user-menu-item .org-swatch {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
 .shell-user-wrap {
   position: relative;
 }

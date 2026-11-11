@@ -21,16 +21,19 @@ export function getSupabase(): Promise<SupabaseClient | null> {
 
   if (!clientPromise) {
     clientPromise = import("@supabase/supabase-js")
-      .then(({ createClient }) =>
-        createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
+      .then(({ createClient }) => {
+        const client = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
           auth: {
             persistSession: true,
             autoRefreshToken: true,
             detectSessionInUrl: true,
             flowType: "pkce",
           },
-        })
-      )
+        });
+        /* Debug handle for the browser console. */
+        (window as unknown as Record<string, unknown>).__evolveSupabase = client;
+        return client;
+      })
       .catch((error) => {
         clientPromise = null;
         throw error;

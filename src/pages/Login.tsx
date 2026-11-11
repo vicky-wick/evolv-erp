@@ -1,5 +1,15 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { ArrowLeft, ArrowRight, Loader2, Lock, Mail, ShieldCheck } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Building2,
+  CheckCircle2,
+  Loader2,
+  Lock,
+  Mail,
+  ShieldCheck,
+  User,
+} from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { Mark } from "../components/Mark";
 import { ThemeToggle } from "../components/ThemeToggle";
@@ -18,13 +28,20 @@ const roleLabel: Record<string, string> = {
 
 const demoIds = ["emp-aarav", "emp-neha", "emp-rohit", "emp-rahul", "emp-sneha"];
 
+type LoginMode = "signin" | "signup" | "forgot";
+
 export default function Login() {
-  const { db, user, actions, authMode, authReady, authError } = useStore();
+  const { db, user, actions, authMode, authReady, authError, authUserEmail, orgs } = useStore();
   const navigate = useNavigate();
+  const [mode, setMode] = useState<LoginMode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [orgName, setOrgName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   const isDemo = authMode === "demo";
   const demoAccounts = demoIds
@@ -32,12 +49,21 @@ export default function Login() {
     .filter((e): e is NonNullable<typeof e> => !!e);
 
   useEffect(() => {
-    if (authReady && user) navigate("/app/dashboard", { replace: true });
-  }, [authReady, user, navigate]);
+    if (!authReady) return;
+    if (user) navigate("/app/dashboard", { replace: true });
+    else if (authUserEmail && !orgs.length) navigate("/onboarding", { replace: true });
+  }, [authReady, user, authUserEmail, orgs.length, navigate]);
 
   useEffect(() => {
     if (authError) setError(authError);
   }, [authError]);
+
+  const switchMode = (next: LoginMode) => {
+    setMode(next);
+    setError(null);
+    setNotice(null);
+    setResetSent(false);
+  };
 
   const submit = async (
     e?: FormEvent,
@@ -45,6 +71,75 @@ export default function Login() {
   ) => {
     e?.preventDefault();
     setError(null);
+    setNotice(null);
+
+    if (mode === "forgot") {
+      const mail = email.trim();
+      if (!mail) {
+        setError("Enter the email you signed up with.");
+        return;
+      }
+      setLoading(true);
+      try {
+        const result = await actions.sendPasswordReset(mail);
+        if (!result.ok) {
+          setError(result.error ?? "Could not send the reset email.");
+          return;
+        }
+        setResetSent(true);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    if (mode === "signup") {
+      if (!name.trim()) {
+        setError("Enter your full name.");
+        return;
+      }
+      if (!orgName.trim()) {
+        setError("Give your organization a name.");
+        return;
+      }
+      const mail = email.trim();
+      if (!mail) {
+        setError("Enter your work email to continue.");
+        return;
+      }
+      if (!password) {
+        setError("Choose a password with at least 6 characters.");
+        return;
+      }
+      setLoading(true);
+      try {
+        const result = await actions.signUp({
+          name: name.trim(),
+          orgName: orgName.trim(),
+          email: mail,
+          password,
+        });
+        if (!result.ok) {
+          setError(result.error ?? "Could not create your account. Please try again.");
+          return;
+        }
+        if (result.needsConfirmation) {
+          setMode("signin");
+          setError(null);
+          setResetSent(false);
+          setNotice(
+            `Almost there — we sent a confirmation link to ${mail}. Confirm it, then sign in here.`
+          );
+          return;
+        }
+        navigate("/app/dashboard", { replace: true });
+        return;
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     const mail = (credentials?.email ?? email).trim();
     const pass = credentials?.password ?? password;
 
@@ -54,9 +149,7 @@ export default function Login() {
     }
     if (!pass) {
       setError(
-        isDemo
-          ? "Enter your password. Demo password is “evolve”."
-          : "Enter your password."
+        isDemo ? "Enter your password. Demo password is “evolve”." : "Enter your password."
       );
       return;
     }
@@ -82,11 +175,26 @@ export default function Login() {
     void submit(undefined, { email: mail, password: "evolve" });
   };
 
+  const titles: Record<LoginMode, { title: string; sub: string }> = {
+    signin: {
+      title: "Sign in to Evolve",
+      sub: "Your agency operating system — people, work, money, all in one place.",
+    },
+    signup: {
+      title: "Create your workspace",
+      sub: "Set up an organization in minutes — invite your team after signup.",
+    },
+    forgot: {
+      title: "Reset your password",
+      sub: "We'll email you a secure link to choose a new password.",
+    },
+  };
+
   return (
     <div className="login-page">
       <div className="login-bg" aria-hidden="true" />
 
-      <div className={`login-wrap${isDemo ? " login-wrap-wide" : ""}`}>
+      <div className={`login-wrap${isDemo && mode === "signin" ? " login-wrap-wide" : ""}`}>
         <div className="login-top">
           <Link to="/" className="login-back">
             <ArrowLeft size={14} />
@@ -95,84 +203,179 @@ export default function Login() {
           <ThemeToggle />
         </div>
 
-        <div className={`login-grid${isDemo ? "" : " login-grid-single"}`}>
+        <div className={`login-grid${isDemo && mode === "signin" ? "" : " login-grid-single"}`}>
           <div className="login-card">
             <Mark size={44} />
-            <h1>Sign in to Evolve</h1>
-            <p>Your agency operating system — people, work, money, all in one place.</p>
+            <h1>{titles[mode].title}</h1>
+            <p>{titles[mode].sub}</p>
 
-            <form onSubmit={submit} noValidate>
-              <label className="auth-field">
-                <span>Work email</span>
-                <div className="auth-input">
-                  <Mail size={15} />
-                  <input
-                    type="email"
-                    placeholder="you@evolve.agency"
-                    value={email}
-                    onChange={(e) => {
-                      setEmail(e.target.value);
-                      if (error) setError(null);
-                      if (authError) actions.clearAuthError();
-                    }}
-                    autoComplete="email"
-                  />
-                </div>
-              </label>
-
-              <label className="auth-field">
-                <span>Password</span>
-                <div className="auth-input">
-                  <Lock size={15} />
-                  <input
-                    type="password"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => {
-                      setPassword(e.target.value);
-                      if (error) setError(null);
-                      if (authError) actions.clearAuthError();
-                    }}
-                    autoComplete="current-password"
-                  />
-                </div>
-              </label>
-
-              {error && (
-                <p className="form-error" role="alert">
-                  {error}
+            {resetSent ? (
+              <div className="auth-success" role="status">
+                <CheckCircle2 size={22} />
+                <strong>Check your inbox</strong>
+                <p>
+                  If an account exists for <strong>{email.trim()}</strong>, a reset link is on
+                  its way. The link opens a page where you can choose a new password.
                 </p>
-              )}
-
-              <button type="submit" className="btn btn-primary login-submit" disabled={loading}>
-                {loading ? (
+                <button type="button" className="btn btn-secondary" onClick={() => switchMode("signin")}>
+                  Back to sign in
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={submit} noValidate>
+                {mode === "signup" && (
                   <>
-                    <Loader2 className="spin" size={16} /> Signing in…
+                    <label className="auth-field">
+                      <span>Your name</span>
+                      <div className="auth-input">
+                        <User size={15} />
+                        <input
+                          type="text"
+                          placeholder="Aarav Mehta"
+                          value={name}
+                          onChange={(e) => {
+                            setName(e.target.value);
+                            if (error) setError(null);
+                          }}
+                          autoComplete="name"
+                        />
+                      </div>
+                    </label>
+                    <label className="auth-field">
+                      <span>Organization name</span>
+                      <div className="auth-input">
+                        <Building2 size={15} />
+                        <input
+                          type="text"
+                          placeholder="Evolve Creative Agency"
+                          value={orgName}
+                          onChange={(e) => {
+                            setOrgName(e.target.value);
+                            if (error) setError(null);
+                          }}
+                          autoComplete="organization"
+                        />
+                      </div>
+                    </label>
+                  </>
+                )}
+
+                <label className="auth-field">
+                  <span>{mode === "forgot" ? "Account email" : "Work email"}</span>
+                  <div className="auth-input">
+                    <Mail size={15} />
+                    <input
+                      type="email"
+                      placeholder="you@evolve.agency"
+                      value={email}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        if (error) setError(null);
+                        if (authError) actions.clearAuthError();
+                      }}
+                      autoComplete="email"
+                    />
+                  </div>
+                </label>
+
+                {mode !== "forgot" && (
+                  <label className="auth-field">
+                    <span>{mode === "signup" ? "Choose a password" : "Password"}</span>
+                    <div className="auth-input">
+                      <Lock size={15} />
+                      <input
+                        type="password"
+                        placeholder={mode === "signup" ? "At least 6 characters" : "••••••••"}
+                        value={password}
+                        onChange={(e) => {
+                          setPassword(e.target.value);
+                          if (error) setError(null);
+                          if (authError) actions.clearAuthError();
+                        }}
+                        autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                      />
+                    </div>
+                  </label>
+                )}
+
+                {error && (
+                  <p className="form-error" role="alert">
+                    {error}
+                  </p>
+                )}
+                {notice && (
+                  <p className="form-notice" role="status">
+                    {notice}
+                  </p>
+                )}
+
+                <button type="submit" className="btn btn-primary login-submit" disabled={loading}>
+                  {loading ? (
+                    <>
+                      <Loader2 className="spin" size={16} />
+                      {mode === "signin" ? "Signing in…" : mode === "signup" ? "Creating workspace…" : "Sending link…"}
+                    </>
+                  ) : (
+                    <>
+                      {mode === "signin" ? (
+                        <>
+                          Sign in <ArrowRight size={16} />
+                        </>
+                      ) : mode === "signup" ? (
+                        <>
+                          Create workspace <ArrowRight size={16} />
+                        </>
+                      ) : (
+                        "Send reset link"
+                      )}
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
+
+            {mode !== "forgot" && (
+              <div className="login-alt">
+                {mode === "signin" ? (
+                  <>
+                    <span>New here?</span>
+                    <button type="button" className="login-link" onClick={() => switchMode("signup")}>
+                      Create a workspace
+                    </button>
+                    <span className="login-dot" aria-hidden="true" />
+                    <button type="button" className="login-link" onClick={() => switchMode("forgot")}>
+                      Forgot password?
+                    </button>
                   </>
                 ) : (
                   <>
-                    Sign in <ArrowRight size={16} />
+                    <span>Already have an account?</span>
+                    <button type="button" className="login-link" onClick={() => switchMode("signin")}>
+                      Sign in
+                    </button>
                   </>
                 )}
-              </button>
-            </form>
+              </div>
+            )}
 
-            {isDemo ? (
+            {isDemo && mode === "signin" && (
               <div className="login-hint">
                 Demo access — use any seeded work email with password <code>evolve</code>
               </div>
-            ) : (
+            )}
+
+            {!isDemo && mode === "signin" && (
               <div className="login-hint login-hint-auth">
                 <ShieldCheck size={14} />
                 <span>
-                  Secured by Supabase. Use the account issued by your administrator — access is
-                  limited to emails already on the employee list.
+                  Secured by Supabase. Your account can belong to multiple organizations —
+                  data is stored in a private Postgres database with row-level security.
                 </span>
               </div>
             )}
           </div>
 
-          {isDemo && (
+          {isDemo && mode === "signin" && (
             <div className="login-demo">
               <div className="login-demo-head">
                 <strong>Explore every role</strong>

@@ -49,8 +49,28 @@ import {
   uid,
 } from "../lib/format";
 import { authErrorMessage, getSupabase, isSupabaseConfigured } from "../lib/supabase";
+import {
+  COLLECTION_KEYS,
+  SPECS,
+  createOrganization,
+  ensureOrgSeeded,
+  fetchOrgDB,
+  fetchOrgs,
+  snapshotOf,
+  syncDiff,
+  type OrgSummary,
+  type Snapshot,
+} from "../lib/backend";
 
 const DB_KEY = "evolve.erp.db.v1";
+
+export type SyncStatus = "idle" | "saving" | "saved" | "error";
+
+export interface SyncState {
+  status: SyncStatus;
+  at?: number;
+  message?: string;
+}
 
 /* ---------------- persistence ---------------- */
 function loadDB(): DB {
@@ -91,13 +111,27 @@ export type AuthMode = "supabase" | "demo";
 export interface AuthResult {
   ok: boolean;
   error?: string;
+  needsConfirmation?: boolean;
+}
+
+export interface SignUpInput {
+  name: string;
+  orgName: string;
+  email: string;
+  password: string;
 }
 
 export interface StoreActions {
   login: (email: string, password: string) => Promise<AuthResult>;
+  signUp: (input: SignUpInput) => Promise<AuthResult>;
+  sendPasswordReset: (email: string) => Promise<AuthResult>;
+  updatePassword: (password: string) => Promise<AuthResult>;
+  createOrg: (input: { name: string; orgName: string }) => Promise<AuthResult>;
+  switchOrg: (orgId: string) => void;
   logout: () => void;
   switchUser: (employeeId: string) => void;
   clearAuthError: () => void;
+  retrySync: () => void;
 
   /* attendance */
   checkIn: () => void;
@@ -250,6 +284,12 @@ interface StoreCtx {
   authMode: AuthMode;
   authReady: boolean;
   authError: string | null;
+  /** true once the workspace data (org DB) is loaded and usable */
+  dataReady: boolean;
+  authUserEmail: string | null;
+  orgs: OrgSummary[];
+  activeOrgId: string | null;
+  syncState: SyncState;
 }
 
 const Ctx = createContext<StoreCtx | null>(null);
@@ -279,7 +319,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timers = useRef<number[]>([]);
 
+  const authMode: AuthMode = isSupabaseConfigured ? "supabase" : "demo";
+  const authModeRef = useRef<AuthMode>(authMode);
+
   useEffect(() => {
+    authModeRef.current = authMode;
+  }, [authMode]);
+
+  /* Demo mode keeps the whole workspace in localStorage. In cloud mode the
+     database is the source of truth and only the last-opened employee per
+     org is remembered locally. */
+  useEffect(() => {
+    if (authModeRef.current !== "demo") return;
     try {
       localStorage.setItem(DB_KEY, JSON.stringify(db));
     } catch {
@@ -305,11 +356,271 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /* ---------------- Supabase session ---------------- */
   const [authReady, setAuthReady] = useState(() => !isSupabaseConfigured);
   const [authError, setAuthError] = useState<string | null>(null);
-  const dbRef = useRef(db);
+  const [dataReady, setDataReady] = useState(() => !isSupabaseConfigured);
+  const [authUserEmail, setAuthUserEmail] = useState<string | null>(null);
+  const [orgs, setOrgs] = useState<OrgSummary[]>([]);
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
+  const [syncState, setSyncState] = useState<SyncState>({ status: "idle" });
 
+  const dbRef = useRef(db);
   useEffect(() => {
     dbRef.current = db;
   }, [db]);
+
+  const snapshotRef = useRef<Snapshot | null>(null);
+  const workspaceLoadRef = useRef<Promise<boolean> | null>(null);
+  const activeOrgRef = useRef<string | null>(null);
+  const loadingWorkspaceRef = useRef(false);
+  const remoteApplyRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const syncingRef = useRef(false);
+  const syncAgainRef = useRef(false);
+  const pendingRemoteRef = useRef(false);
+  const syncTimerRef = useRef<number | null>(null);
+  const remoteTimerRef = useRef<number | null>(null);
+  const realtimeRef = useRef<{ unsubscribe: () => void } | null>(null);
+
+  const normEmail = (email: string | null | undefined) => (email ?? "").trim().toLowerCase();
+
+  const unsubscribeRealtime = useCallback(() => {
+    realtimeRef.current?.unsubscribe();
+    realtimeRef.current = null;
+  }, []);
+
+  const refreshFromServer = useCallback(async () => {
+    if (loadingWorkspaceRef.current || workspaceLoadRef.current) return;
+    const client = await getSupabase();
+    const orgId = activeOrgRef.current;
+    if (!client || !orgId) return;
+    if (syncingRef.current || dirtyRef.current) {
+      pendingRemoteRef.current = true;
+      return;
+    }
+    try {
+      const fetched = await fetchOrgDB(client, orgId);
+      if (activeOrgRef.current !== orgId) return;
+      remoteApplyRef.current = true;
+      setDb((prev) => ({ ...fetched.db, sessionEmployeeId: prev.sessionEmployeeId }));
+      snapshotRef.current = snapshotOf(orgId, fetched.db);
+      setSyncState((s) => (s.status === "error" ? { status: "saved", at: Date.now() } : s));
+    } catch {
+      /* transient — realtime or the next change will retry */
+    }
+  }, []);
+
+  const scheduleRemoteRefresh = useCallback(() => {
+    if (syncingRef.current || dirtyRef.current) {
+      pendingRemoteRef.current = true;
+      return;
+    }
+    if (remoteTimerRef.current !== null) return;
+    remoteTimerRef.current = window.setTimeout(() => {
+      remoteTimerRef.current = null;
+      void refreshFromServer();
+    }, 500);
+  }, [refreshFromServer]);
+
+  const subscribeRealtime = useCallback(
+    (client: NonNullable<Awaited<ReturnType<typeof getSupabase>>>, orgId: string) => {
+      unsubscribeRealtime();
+      const channel = client.channel(`evolve-org-${orgId}`);
+      for (const key of COLLECTION_KEYS) {
+        channel.on("postgres_changes" as never, {
+          event: "*",
+          schema: "public",
+          table: SPECS[key].table,
+          filter: `org_id=eq.${orgId}`,
+        } as never, scheduleRemoteRefresh);
+      }
+      channel.on("postgres_changes" as never, {
+        event: "*",
+        schema: "public",
+        table: "organizations",
+        filter: `id=eq.${orgId}`,
+      } as never, scheduleRemoteRefresh);
+      channel.subscribe((status) => {
+        /* The socket can drop while backgrounded — rejoin transparently. */
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          window.setTimeout(() => {
+            if (activeOrgRef.current === orgId) subscribeRealtime(client, orgId);
+          }, 3000);
+        }
+      });
+      realtimeRef.current = {
+        unsubscribe: () => {
+          void client.removeChannel(channel);
+        },
+      };
+    },
+    [scheduleRemoteRefresh, unsubscribeRealtime]
+  );
+
+  const runSync = useCallback(async () => {
+    const client = await getSupabase();
+    const orgId = activeOrgRef.current;
+    if (!client || !orgId || !snapshotRef.current) return;
+    if (syncingRef.current) {
+      syncAgainRef.current = true;
+      return;
+    }
+    syncingRef.current = true;
+    dirtyRef.current = false;
+    setSyncState((s) => ({ ...s, status: "saving" }));
+    try {
+      const outcome = await syncDiff(client, orgId, dbRef.current, snapshotRef.current);
+      snapshotRef.current = outcome.snapshot;
+      dirtyRef.current = false;
+      setSyncState({ status: "saved", at: Date.now() });
+      if (pendingRemoteRef.current) {
+        pendingRemoteRef.current = false;
+        void refreshFromServer();
+      }
+    } catch (error) {
+      dirtyRef.current = true;
+      setSyncState({ status: "error", message: authErrorMessage(error) });
+    } finally {
+      syncingRef.current = false;
+      if (syncAgainRef.current) {
+        syncAgainRef.current = false;
+        void runSync();
+      }
+    }
+  }, [refreshFromServer]);
+
+  /* Local mutations debounce-push a diff to Supabase. */
+  useEffect(() => {
+    if (authModeRef.current !== "supabase") return;
+    if (remoteApplyRef.current) {
+      remoteApplyRef.current = false;
+      return;
+    }
+    if (!activeOrgRef.current || !snapshotRef.current || !dataReady) return;
+    dirtyRef.current = true;
+    if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = window.setTimeout(() => {
+      syncTimerRef.current = null;
+      void runSync();
+    }, 700);
+  }, [db, dataReady, runSync]);
+
+  /* Flush pending changes when the tab is hidden or closed. */
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    const flush = () => {
+      if (syncTimerRef.current !== null) {
+        window.clearTimeout(syncTimerRef.current);
+        syncTimerRef.current = null;
+      }
+      void runSync();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        flush();
+      } else {
+        /* Catch up on changes made in other sessions while away. */
+        scheduleRemoteRefresh();
+      }
+    };
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") scheduleRemoteRefresh();
+    }, 60000);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", flush);
+    };
+  }, [runSync, scheduleRemoteRefresh]);
+
+  /* Activate an organization: fetch its DB (seeding the demo org on first
+     login) and resolve which employee record the session user drives. */
+  const activateOrg = useCallback(
+    async (client: NonNullable<Awaited<ReturnType<typeof getSupabase>>>, orgId: string, email: string | null) => {
+      const fetched = await fetchOrgDB(client, orgId);
+      let finalDB = fetched.db;
+      let snap = snapshotOf(orgId, fetched.db);
+
+      if (finalDB.employees.length === 0) {
+        const seeded = await ensureOrgSeeded(client, orgId, fetched.org);
+        if (seeded) {
+          finalDB = seeded.db;
+          snap = seeded.snapshot;
+        }
+      }
+
+      const normalized = normEmail(email);
+      const sessKey = `evolve.sess.${orgId}.${normalized}`;
+      const storedEmpId = localStorage.getItem(sessKey);
+      const employee =
+        finalDB.employees.find((e) => e.id === storedEmpId && e.status !== "exited") ??
+        finalDB.employees.find(
+          (e) => e.email.toLowerCase() === normalized && e.status !== "exited"
+        ) ??
+        null;
+
+      if (!employee) {
+        setAuthError(
+          "This account is not linked to an employee record in this workspace. Ask an administrator to add your email."
+        );
+        window.setTimeout(() => {
+          void client.auth.signOut({ scope: "local" });
+        }, 0);
+        return false;
+      }
+
+      localStorage.setItem(sessKey, employee.id);
+      localStorage.setItem(`evolve.org.${normalized}`, orgId);
+
+      activeOrgRef.current = orgId;
+      snapshotRef.current = snap;
+      remoteApplyRef.current = true;
+      setDb({ ...finalDB, sessionEmployeeId: employee.id });
+      setActiveOrgId(orgId);
+      setAuthUserEmail(normalized || null);
+      setAuthError(null);
+      setDataReady(true);
+      setSyncState({ status: "saved", at: Date.now() });
+      subscribeRealtime(client, orgId);
+      return true;
+    },
+    [subscribeRealtime]
+  );
+
+  const loadWorkspace = useCallback(
+    async (
+      client: NonNullable<Awaited<ReturnType<typeof getSupabase>>>,
+      email: string | null
+    ): Promise<boolean> => {
+      if (workspaceLoadRef.current) return workspaceLoadRef.current;
+      const run = (async () => {
+        try {
+          const userOrgs = await fetchOrgs(client);
+          setOrgs(userOrgs);
+          const normalized = normEmail(email);
+          if (normalized) setAuthUserEmail(normalized);
+          if (!userOrgs.length) {
+            /* Authenticated but no workspace yet — onboarding will pick up. */
+            setActiveOrgId(null);
+            activeOrgRef.current = null;
+            setDataReady(false);
+            return true;
+          }
+          const stored = localStorage.getItem(`evolve.org.${normalized}`);
+          const target = userOrgs.find((o) => o.id === stored) ?? userOrgs[0];
+          return await activateOrg(client, target.id, email);
+        } catch (error) {
+          setAuthError(authErrorMessage(error));
+          return false;
+        } finally {
+          workspaceLoadRef.current = null;
+        }
+      })();
+      workspaceLoadRef.current = run;
+      return run;
+    },
+    [activateOrg]
+  );
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -329,48 +640,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        const applySession = (email: string | null) => {
-          if (!active) return;
-          const normalized = (email ?? "").trim().toLowerCase();
-          const employee = normalized
-            ? dbRef.current.employees.find(
-                (e) => e.email.toLowerCase() === normalized && e.status !== "exited"
-              )
-            : undefined;
-
-          if (normalized && !employee) {
-            setAuthError(
-              "This account is not linked to an employee record. Ask an administrator to add your email."
-            );
-            /* Defer sign-out: auth calls made inside the callback can deadlock. */
-            window.setTimeout(() => {
-              void client.auth.signOut({ scope: "local" });
-            }, 0);
-          } else {
-            setAuthError(null);
-          }
-
-          const nextId = employee?.id ?? null;
-          setDb((prev) =>
-            prev.sessionEmployeeId === nextId ? prev : { ...prev, sessionEmployeeId: nextId }
-          );
-        };
-
         const { data: listener } = client.auth.onAuthStateChange((event, session) => {
           if (!active) return;
           if (event === "INITIAL_SESSION") return;
           if (event === "SIGNED_OUT") {
+            unsubscribeRealtime();
+            snapshotRef.current = null;
+            activeOrgRef.current = null;
+            dirtyRef.current = false;
+            syncingRef.current = false;
+            setOrgs([]);
+            setActiveOrgId(null);
+            setAuthUserEmail(null);
+            setDataReady(false);
+            setSyncState({ status: "idle" });
             setDb((prev) =>
               prev.sessionEmployeeId === null ? prev : { ...prev, sessionEmployeeId: null }
             );
             return;
           }
-          applySession(session?.user.email ?? null);
+          if (event === "SIGNED_IN" && session?.user) {
+            void loadWorkspace(client, session.user.email ?? null);
+          }
         });
         unsubscribe = () => listener.subscription.unsubscribe();
 
         const { data } = await client.auth.getSession();
-        applySession(data.session?.user.email ?? null);
+        if (data.session?.user) {
+          await loadWorkspace(client, data.session.user.email ?? null);
+        }
       } catch {
         if (active) {
           setDb((prev) =>
@@ -388,7 +686,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       active = false;
       unsubscribe?.();
     };
-  }, []);
+  }, [loadWorkspace, unsubscribeRealtime]);
 
   const user = useMemo(
     () => db.employees.find((e) => e.id === db.sessionEmployeeId) ?? null,
@@ -451,15 +749,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       async login(email, password) {
         setAuthError(null);
-        const emp = db.employees.find(
-          (e) => e.email.toLowerCase() === email.trim().toLowerCase()
-        );
-        if (!emp) {
-          return { ok: false, error: "No employee account found for that email." };
-        }
-        if (emp.status === "exited") {
-          return { ok: false, error: "This account has been deactivated." };
-        }
+        const normalized = email.trim().toLowerCase();
 
         if (isSupabaseConfigured) {
           try {
@@ -468,22 +758,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               return { ok: false, error: "Supabase authentication is unavailable." };
             }
             const { error } = await client.auth.signInWithPassword({
-              email: emp.email,
+              email: normalized,
               password,
             });
             if (error) {
               return { ok: false, error: authErrorMessage(error) };
             }
+            const ok = await loadWorkspace(client, normalized);
+            if (!ok) {
+              return {
+                ok: false,
+                error: "Signed in, but no workspace is linked to this account yet.",
+              };
+            }
+            const name = dbRef.current.employees.find(
+              (e) => e.id === dbRef.current.sessionEmployeeId
+            )?.name;
+            if (name) toast(`Signed in as ${name}.`);
+            return { ok: true };
           } catch (error) {
             return { ok: false, error: authErrorMessage(error) };
           }
-          mutate((draft) => {
-            draft.sessionEmployeeId = emp.id;
-          });
-          toast(`Signed in as ${emp.name}.`);
-          return { ok: true };
         }
 
+        const emp = db.employees.find((e) => e.email.toLowerCase() === normalized);
+        if (!emp) {
+          return { ok: false, error: "No employee account found for that email." };
+        }
+        if (emp.status === "exited") {
+          return { ok: false, error: "This account has been deactivated." };
+        }
         if (password !== "evolve") {
           return {
             ok: false,
@@ -495,6 +799,127 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         });
         toast(`Signed in as ${emp.name}.`);
         return { ok: true };
+      },
+
+      async signUp(input) {
+        setAuthError(null);
+        if (!isSupabaseConfigured) {
+          return { ok: false, error: "Sign-up requires the Supabase backend." };
+        }
+        if (!input.name.trim() || !input.orgName.trim()) {
+          return { ok: false, error: "Your name and organization name are required." };
+        }
+        if (input.password.length < 6) {
+          return { ok: false, error: "Use a password with at least 6 characters." };
+        }
+        try {
+          const client = await getSupabase();
+          if (!client) {
+            return { ok: false, error: "Supabase authentication is unavailable." };
+          }
+          const normalized = input.email.trim().toLowerCase();
+          const { data, error } = await client.auth.signUp({
+            email: normalized,
+            password: input.password,
+          });
+          if (error) {
+            return { ok: false, error: authErrorMessage(error) };
+          }
+          if (!data.session || !data.user) {
+            /* Email confirmation required — no session yet. */
+            return { ok: true, needsConfirmation: true };
+          }
+          const userId = data.user.id;
+          await createOrganization(client, userId, {
+            orgName: input.orgName,
+            adminName: input.name,
+            adminEmail: data.user.email ?? normalized,
+          });
+          await loadWorkspace(client, data.user.email ?? normalized);
+          toast(`Workspace “${input.orgName.trim()}” is ready. Welcome aboard!`);
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, error: authErrorMessage(error) };
+        }
+      },
+
+      async sendPasswordReset(email) {
+        if (!isSupabaseConfigured) {
+          return { ok: false, error: "Password reset requires the Supabase backend." };
+        }
+        try {
+          const client = await getSupabase();
+          if (!client) {
+            return { ok: false, error: "Supabase authentication is unavailable." };
+          }
+          const { error } = await client.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+            redirectTo: `${window.location.origin}/reset-password`,
+          });
+          if (error) return { ok: false, error: authErrorMessage(error) };
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, error: authErrorMessage(error) };
+        }
+      },
+
+      async updatePassword(password) {
+        if (!isSupabaseConfigured) {
+          return { ok: false, error: "Password updates require the Supabase backend." };
+        }
+        try {
+          const client = await getSupabase();
+          if (!client) {
+            return { ok: false, error: "Supabase authentication is unavailable." };
+          }
+          const { error } = await client.auth.updateUser({ password });
+          if (error) return { ok: false, error: authErrorMessage(error) };
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, error: authErrorMessage(error) };
+        }
+      },
+
+      async createOrg(input) {
+        if (!input.name.trim() || !input.orgName.trim()) {
+          return { ok: false, error: "Your name and the organization name are required." };
+        }
+        try {
+          const client = await getSupabase();
+          if (!client) {
+            return { ok: false, error: "Supabase authentication is unavailable." };
+          }
+          const { data } = await client.auth.getSession();
+          const sessionUser = data.session?.user;
+          if (!sessionUser) {
+            return { ok: false, error: "Your session expired. Please sign in again." };
+          }
+          const email = sessionUser.email ?? "";
+          await createOrganization(client, sessionUser.id, {
+            orgName: input.orgName,
+            adminName: input.name,
+            adminEmail: email,
+          });
+          await loadWorkspace(client, email);
+          toast(`Workspace “${input.orgName.trim()}” is ready. Welcome aboard!`);
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, error: authErrorMessage(error) };
+        }
+      },
+
+      switchOrg(orgId) {
+        void (async () => {
+          try {
+            const client = await getSupabase();
+            if (!client || !activeOrgRef.current || orgId === activeOrgRef.current) return;
+            const { data } = await client.auth.getSession();
+            const email = data.session?.user?.email ?? null;
+            await activateOrg(client, orgId, email);
+            toast(`Switched to ${orgs.find((o) => o.id === orgId)?.name ?? "workspace"}.`);
+          } catch (error) {
+            toast(authErrorMessage(error), "error");
+          }
+        })();
       },
 
       logout() {
@@ -522,6 +947,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           draft.sessionEmployeeId = employeeId;
         });
         toast(`Demo view: ${emp.name} · ${emp.role}`);
+      },
+
+      retrySync() {
+        if (!isSupabaseConfigured) return;
+        dirtyRef.current = true;
+        void runSync();
       },
 
       /* ---------------- attendance ---------------- */
@@ -1509,6 +1940,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
 
       resetDemo() {
+        if (isSupabaseConfigured) {
+          toast("Demo reset is only available in the offline demo mode.", "info");
+          return;
+        }
         setDb((prev) => {
           const fresh = buildSeedDB();
           fresh.sessionEmployeeId = prev.sessionEmployeeId;
@@ -1517,7 +1952,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         toast("Demo data reset to a fresh state.", "info");
       },
     };
-  }, [db, user, mutate, toast]);
+  }, [db, user, mutate, toast, loadWorkspace, activateOrg, runSync, orgs]);
 
   return (
     <Ctx.Provider
@@ -1526,9 +1961,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         user,
         actions,
         toasts,
-        authMode: isSupabaseConfigured ? "supabase" : "demo",
+        authMode,
         authReady,
         authError,
+        dataReady,
+        authUserEmail,
+        orgs,
+        activeOrgId,
+        syncState,
       }}
     >
       {children}

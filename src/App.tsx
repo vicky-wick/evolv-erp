@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
+import Onboarding from "./pages/Onboarding";
+import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import HR from "./pages/HR";
 import Attendance from "./pages/Attendance";
@@ -15,6 +17,7 @@ import Reports from "./pages/Reports";
 import SettingsPage from "./pages/Settings";
 import AppShell from "./components/AppShell";
 import ProtectedRoute, { ModuleGuard } from "./components/ProtectedRoute";
+import ErrorBoundary from "./components/ErrorBoundary";
 import type { ModuleId } from "./types";
 
 function guarded(module: ModuleId, element: ReactNode) {
@@ -23,9 +26,12 @@ function guarded(module: ModuleId, element: ReactNode) {
 
 function AppRoutes() {
   return (
-    <Routes>
+    <ErrorBoundary>
+      <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
+      <Route path="/onboarding" element={<Onboarding />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route
         path="/app"
         element={
@@ -48,7 +54,8 @@ function AppRoutes() {
         <Route path="settings" element={guarded("settings", <SettingsPage />)} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+      </Routes>
+    </ErrorBoundary>
   );
 }
 
