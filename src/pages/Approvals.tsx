@@ -272,11 +272,9 @@ export default function Approvals() {
                   <tr>
                     <th>Document</th>
                     <th>Category</th>
-                    <th>Linked entity</th>
-                    <th>Version</th>
+                    <th>Linked to</th>
                     <th>Uploaded</th>
                     <th>Expiry</th>
-                    <th>Access</th>
                     <th />
                   </tr>
                 </thead>
@@ -302,7 +300,6 @@ export default function Approvals() {
                               "—"
                             : "—"}
                         </td>
-                        <td>v{d.versions[0]?.version ?? 1}</td>
                         <td>{fmtDate(d.uploadedAt.slice(0, 10))}</td>
                         <td>
                           {d.expiry ? (
@@ -310,13 +307,6 @@ export default function Approvals() {
                           ) : (
                             <span className="cell-muted">—</span>
                           )}
-                        </td>
-                        <td>
-                          <div className="role-dots">
-                            {d.accessRoles.map((r) => (
-                              <span key={r} className={`role-dot role-${r}`} title={r}>{r[0].toUpperCase()}</span>
-                            ))}
-                          </div>
                         </td>
                         <td className="cell-cta">Open →</td>
                       </tr>

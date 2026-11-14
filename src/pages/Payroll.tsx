@@ -291,7 +291,7 @@ export default function Payroll() {
                       <table className="tbl">
                         <thead>
                           <tr>
-                            <th>Employee</th><th>Gross</th><th>Days paid</th><th>OT</th><th>Extra tasks</th><th>Incentives</th><th>Deductions</th><th>Net</th><th />
+                            <th>Employee</th><th>Gross</th><th>Incentives</th><th>Deductions</th><th>Net</th><th />
                           </tr>
                         </thead>
                         <tbody>
@@ -307,9 +307,6 @@ export default function Payroll() {
                                   </div>
                                 </td>
                                 <td>{currency(l.gross)}</td>
-                                <td>{l.paidDays}{l.halfDays ? ` + ${l.halfDays} half` : ""}</td>
-                                <td>{l.overtimeHours}h{l.weekendOvertimeHours ? ` + ${l.weekendOvertimeHours}w` : ""}</td>
-                                <td>{l.extraTasks}</td>
                                 <td className="pos">{currency(lineIncentives(l))}</td>
                                 <td className="neg">{currency(deductions)}</td>
                                 <td><strong>{currency(l.net)}</strong></td>

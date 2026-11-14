@@ -222,16 +222,15 @@ export default function Attendance() {
             <Stat label="Leave taken" value={`${monthSummary.paidLeaveDays + monthSummary.unpaidLeaveDays}d`} sub={`${monthSummary.unpaidLeaveDays}d unpaid`} />
           </div>
 
-          <div className="att-grid">
-            <section className="panel">
-              <div className="panel-head">
-                <h2>Calendar</h2>
-                <select className="select select-sm" value={month} onChange={(e) => setMonth(e.target.value)}>
-                  {listMonths(4).slice().reverse().map((m) => (
-                    <option key={m} value={m}>{monthLabel(m)}</option>
-                  ))}
-                </select>
-              </div>
+          <section className="panel">
+            <div className="panel-head">
+              <h2>Calendar</h2>
+              <select className="select select-sm" value={month} onChange={(e) => setMonth(e.target.value)}>
+                {listMonths(4).slice().reverse().map((m) => (
+                  <option key={m} value={m}>{monthLabel(m)}</option>
+                ))}
+              </select>
+            </div>
               <div className="cal-head">
                 {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
                   <span key={i}>{d}</span>
@@ -266,28 +265,11 @@ export default function Attendance() {
                 <span><i className="lg absent" /> Absent</span>
                 <span><i className="lg holiday" /> Holiday</span>
               </div>
-            </section>
-
-            <section className="panel">
-              <div className="panel-head">
-                <h2>Monthly summary</h2>
-                <span className="panel-hint">{monthLabel(month)}</span>
-              </div>
-              <div className="kv-grid kv-single">
-                <div className="kv"><span>Present / WFH</span><strong>{monthSummary.present + monthSummary.wfhDays} days</strong></div>
-                <div className="kv"><span>Paid leave</span><strong>{monthSummary.paidLeaveDays} days</strong></div>
-                <div className="kv"><span>Unpaid leave</span><strong>{monthSummary.unpaidLeaveDays} days</strong></div>
-                <div className="kv"><span>Absent</span><strong>{monthSummary.absentDays} days</strong></div>
-                <div className="kv"><span>Overtime</span><strong>{Math.round(monthSummary.overtimeHours * 10) / 10}h</strong></div>
-                <div className="kv"><span>Weekend work</span><strong>{Math.round(monthSummary.weekendOvertimeHours * 10) / 10}h</strong></div>
-              </div>
               <p className="form-note">
-                Overtime is paid at <b>{db.settings.payroll.otMultiplier}×</b>, weekend work at{" "}
-                <b>{db.settings.payroll.weekendOtMultiplier}×</b> your hourly rate. Approved leave adjusts
-                payroll automatically.
+                Overtime pays <b>{db.settings.payroll.otMultiplier}×</b>, weekend work{" "}
+                <b>{db.settings.payroll.weekendOtMultiplier}×</b> your hourly rate.
               </p>
-            </section>
-          </div>
+          </section>
 
           <section className="panel">
             <div className="panel-head">
@@ -298,7 +280,7 @@ export default function Attendance() {
               <table className="tbl">
                 <thead>
                   <tr>
-                    <th>Date</th><th>Check in</th><th>Check out</th><th>Breaks</th><th>Worked</th><th>Extra</th><th>Status</th><th>Note</th>
+                    <th>Date</th><th>Check in</th><th>Check out</th><th>Worked</th><th>Extra</th><th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -312,11 +294,9 @@ export default function Attendance() {
                           <td>{fmtShortDate(rec.date)}</td>
                           <td>{rec.checkIn ?? "—"}</td>
                           <td>{rec.checkOut ?? "—"}</td>
-                          <td>{rec.breaks.filter((b) => b.end).length}</td>
                           <td>{mins ? hoursLabel(mins) : "—"}</td>
                           <td>{rec.overtimeMinutes ? <Badge tone="violet">{hoursLabel(rec.overtimeMinutes)}</Badge> : "—"}</td>
                           <td><StatusBadge status={rec.status} /></td>
-                          <td className="cell-muted">{rec.note ?? "—"}</td>
                         </tr>
                       );
                     })}

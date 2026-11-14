@@ -112,12 +112,9 @@ export default function Assets() {
           <tr>
             <th>Asset</th>
             <th>Category</th>
-            <th>Serial</th>
             <th>Assigned to</th>
-            <th>Purchased</th>
             <th>Value</th>
             <th>Warranty</th>
-            <th>Condition</th>
             <th>Status</th>
             <th />
           </tr>
@@ -137,7 +134,6 @@ export default function Assets() {
                   </div>
                 </td>
                 <td>{a.category}</td>
-                <td className="cell-muted">{a.serial}</td>
                 <td>
                   {a.assigneeId ? (
                     <div className="cell-user">
@@ -148,13 +144,11 @@ export default function Assets() {
                     <span className="cell-muted">Unassigned</span>
                   )}
                 </td>
-                <td>{fmtDate(a.purchaseDate)}</td>
                 <td>{currency(a.purchasePrice)}</td>
                 <td>
                   <span className={warrantySoon ? "overdue" : ""}>{fmtDate(a.warrantyUntil)}</span>
                   {warrantySoon && <Badge tone="amber">soon</Badge>}
                 </td>
-                <td className="capitalize">{a.condition}</td>
                 <td><StatusBadge status={a.status} /></td>
                 <td className="cell-cta">Open →</td>
               </tr>

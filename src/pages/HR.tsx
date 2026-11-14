@@ -253,9 +253,7 @@ export default function HR() {
                   <th>Designation</th>
                   <th>Department</th>
                   <th>Manager</th>
-                  <th>Type</th>
                   <th>Status</th>
-                  <th>Joined</th>
                   <th />
                 </tr>
               </thead>
@@ -274,9 +272,7 @@ export default function HR() {
                     <td>{e.designation}</td>
                     <td>{deptName(e.departmentId)}</td>
                     <td>{empName(e.managerId)}</td>
-                    <td className="capitalize">{e.employmentType}</td>
                     <td><StatusBadge status={e.status} /></td>
-                    <td>{fmtDate(e.joiningDate)}</td>
                     <td className="cell-cta">Open →</td>
                   </tr>
                 ))}

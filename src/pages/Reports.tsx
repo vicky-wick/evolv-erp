@@ -13,7 +13,6 @@ import { MonthlyChart } from "../components/charts";
 import type { Role } from "../types";
 import {
   currency,
-  currencyCompact,
   fmtDate,
   fmtShortDate,
   listMonths,
@@ -58,7 +57,7 @@ const REPORTS: ReportDef[] = [
   {
     id: "headcount",
     name: "Headcount",
-    description: "Department-wise strength, status and monthly salary cost.",
+    description: "People and salary cost per department.",
     icon: BarChart3,
     roles: ["admin", "hr", "finance"],
     usesMonth: false,
@@ -66,7 +65,7 @@ const REPORTS: ReportDef[] = [
   {
     id: "attendance",
     name: "Attendance register",
-    description: "Present, late, leave, unpaid days and overtime per employee.",
+    description: "Present, late and overtime per employee.",
     icon: FileText,
     roles: ["admin", "hr", "finance", "manager"],
     usesMonth: true,
@@ -74,7 +73,7 @@ const REPORTS: ReportDef[] = [
   {
     id: "leave",
     name: "Leave report",
-    description: "Every leave request with approval status and balance impact.",
+    description: "Leave taken this month and its status.",
     icon: FileText,
     roles: ["admin", "hr", "manager"],
     usesMonth: true,
@@ -82,7 +81,7 @@ const REPORTS: ReportDef[] = [
   {
     id: "payroll",
     name: "Payroll register",
-    description: "Gross, incentives, statutory deductions and net pay.",
+    description: "Gross, incentives, deductions and net pay.",
     icon: FileSpreadsheet,
     roles: ["admin", "hr", "finance"],
     usesMonth: true,
@@ -90,7 +89,7 @@ const REPORTS: ReportDef[] = [
   {
     id: "projects",
     name: "Project profitability",
-    description: "Budget vs labour and expenses, margin and delivery progress.",
+    description: "Budget vs spend and margin per project.",
     icon: TrendingUp,
     roles: ["admin", "hr", "finance", "manager"],
     usesMonth: false,
@@ -98,7 +97,7 @@ const REPORTS: ReportDef[] = [
   {
     id: "tasks",
     name: "Task delivery",
-    description: "Assignments, deadlines, status and overdue exposure.",
+    description: "Status, deadlines and overdue work.",
     icon: FileText,
     roles: ["admin", "hr", "finance", "manager"],
     usesMonth: false,
@@ -106,7 +105,7 @@ const REPORTS: ReportDef[] = [
   {
     id: "expenses",
     name: "Expense report",
-    description: "All spend with category, status and payment trail.",
+    description: "All spend for the month with status.",
     icon: FileSpreadsheet,
     roles: ["admin", "finance"],
     usesMonth: true,
@@ -114,7 +113,7 @@ const REPORTS: ReportDef[] = [
   {
     id: "pnl",
     name: "Profit & loss",
-    description: "Monthly income, expenses and net position.",
+    description: "Monthly income, expenses and net.",
     icon: TrendingUp,
     roles: ["admin", "finance"],
     usesMonth: false,
@@ -135,15 +134,12 @@ export default function Reports() {
     const employees = db.employees.filter((e) => e.status !== "exited");
     const nameOf = (id?: string | null) =>
       db.employees.find((e) => e.id === id)?.name ?? "—";
-    const deptName = (id: string) => db.departments.find((d) => d.id === id)?.name ?? "—";
 
     if (active.id === "headcount") {
       const cols: Column[] = [
         { label: "Department" },
         { label: "Head" },
         { label: "Headcount" },
-        { label: "Active" },
-        { label: "Probation" },
         { label: "Monthly gross", money: true },
       ];
       const data = db.departments.map((d) => {
@@ -156,8 +152,6 @@ export default function Reports() {
           d.name,
           nameOf(d.headId),
           members.length,
-          members.filter((e) => e.status === "active").length,
-          members.filter((e) => e.status === "probation").length,
           gross,
         ];
       });
@@ -182,33 +176,27 @@ export default function Reports() {
     if (active.id === "attendance") {
       const cols: Column[] = [
         { label: "Employee" },
-        { label: "Department" },
         { label: "Working days" },
         { label: "Present" },
         { label: "Late" },
-        { label: "Paid leave" },
-        { label: "Unpaid" },
+        { label: "Leave" },
         { label: "Absent" },
         { label: "Overtime (h)" },
-        { label: "Weekend (h)" },
       ];
       const data = employees.map((e) => {
         const s = summarizeMonth(e, month, db.attendance, db.settings);
         return [
           e.name,
-          deptName(e.departmentId),
           s.workingDays,
           s.present,
           s.lateDays,
-          s.paidLeaveDays,
-          s.unpaidLeaveDays,
+          s.paidLeaveDays + s.unpaidLeaveDays,
           s.absentDays,
-          Math.round(s.overtimeHours * 10) / 10,
-          Math.round(s.weekendOvertimeHours * 10) / 10,
+          Math.round((s.overtimeHours + s.weekendOvertimeHours) * 10) / 10,
         ];
       });
-      const totalPresent = data.reduce((s, r) => s + Number(r[3]), 0);
-      const totalOt = data.reduce((s, r) => s + Number(r[8]), 0);
+      const totalPresent = data.reduce((s, r) => s + Number(r[2]), 0);
+      const totalOt = data.reduce((s, r) => s + Number(r[6]), 0);
       return {
         columns: cols,
         rows: data,
@@ -218,7 +206,7 @@ export default function Reports() {
           { label: "Employees", value: String(employees.length) },
           { label: "Present days", value: String(totalPresent) },
           { label: "Overtime hours", value: `${Math.round(totalOt * 10) / 10}h` },
-          { label: "Attendance %", value: `${Math.round((totalPresent / Math.max(1, data.reduce((s, r) => s + Number(r[2]), 0))) * 100)}%` },
+          { label: "Attendance %", value: `${Math.round((totalPresent / Math.max(1, data.reduce((s, r) => s + Number(r[1]), 0))) * 100)}%` },
         ],
       };
     }
@@ -227,12 +215,9 @@ export default function Reports() {
       const cols: Column[] = [
         { label: "Employee" },
         { label: "Type" },
-        { label: "From" },
-        { label: "To" },
+        { label: "Dates" },
         { label: "Days" },
         { label: "Status" },
-        { label: "Applied" },
-        { label: "Approver" },
       ];
       const data = db.leaveRequests
         .filter((l) => l.from.slice(0, 7) === month || l.to.slice(0, 7) === month)
@@ -240,23 +225,20 @@ export default function Reports() {
         .map((l) => [
           nameOf(l.employeeId),
           l.type,
-          fmtDate(l.from),
-          fmtDate(l.to),
+          l.to !== l.from ? `${fmtDate(l.from)} → ${fmtDate(l.to)}` : fmtDate(l.from),
           l.days,
           l.status,
-          fmtDate(l.appliedAt.slice(0, 10)),
-          nameOf(l.approverId),
         ]);
       return {
         columns: cols,
         rows: data,
         title: `Leave report — ${monthLabel(month)}`,
-        subtitle: `${data.length} requests · ${data.filter((r) => r[5] === "pending").length} pending`,
+        subtitle: `${data.length} requests · ${data.filter((r) => r[4] === "pending").length} pending`,
         summary: [
           { label: "Requests", value: String(data.length) },
-          { label: "Approved days", value: String(data.filter((r) => r[5] === "approved").reduce((s, r) => s + Number(r[4]), 0)) },
-          { label: "Pending", value: String(data.filter((r) => r[5] === "pending").length) },
-          { label: "Rejected", value: String(data.filter((r) => r[5] === "rejected").length) },
+          { label: "Approved days", value: String(data.filter((r) => r[4] === "approved").reduce((s, r) => s + Number(r[3]), 0)) },
+          { label: "Pending", value: String(data.filter((r) => r[4] === "pending").length) },
+          { label: "Rejected", value: String(data.filter((r) => r[4] === "rejected").length) },
         ],
       };
     }
@@ -266,8 +248,6 @@ export default function Reports() {
       const cols: Column[] = [
         { label: "Employee" },
         { label: "Gross", money: true },
-        { label: "OT hours" },
-        { label: "Extra tasks" },
         { label: "Incentives", money: true },
         { label: "Deductions", money: true },
         { label: "Net pay", money: true },
@@ -279,8 +259,6 @@ export default function Reports() {
             return [
               emp?.name ?? "—",
               l.gross,
-              l.overtimeHours + l.weekendOvertimeHours,
-              l.extraTasks,
               lineIncentives(l) + l.adjustments.reduce((s, a) => s + a.amount, 0),
               l.unpaidDeduction + l.pf + l.esi + l.pt + l.tds,
               l.net,
@@ -309,12 +287,10 @@ export default function Reports() {
       const cols: Column[] = [
         { label: "Project" },
         { label: "Manager" },
-        { label: "Status" },
         { label: "Deadline" },
         { label: "Progress %" },
         { label: "Budget", money: true },
-        { label: "Labour", money: true },
-        { label: "Expenses", money: true },
+        { label: "Spent", money: true },
         { label: "Margin", money: true },
       ];
       const data = db.projects.map((p) => {
@@ -322,16 +298,14 @@ export default function Reports() {
         return [
           p.name,
           nameOf(p.managerId),
-          p.status,
           fmtShortDate(p.deadline),
           s.progress,
           p.budget,
-          s.laborCost,
-          s.expenseCost,
+          s.laborCost + s.expenseCost,
           s.profitability,
         ];
       });
-      const margin = data.reduce((s, r) => s + Number(r[8]), 0);
+      const margin = data.reduce((s, r) => s + Number(r[6]), 0);
       return {
         columns: cols,
         rows: data,
@@ -340,7 +314,7 @@ export default function Reports() {
         summary: [
           { label: "Projects", value: String(db.projects.length) },
           { label: "Budget", value: currency(db.projects.reduce((s, p) => s + p.budget, 0)) },
-          { label: "Actual cost", value: currency(data.reduce((s, r) => s + Number(r[6]) + Number(r[7]), 0)) },
+          { label: "Spent", value: currency(data.reduce((s, r) => s + Number(r[5]), 0)) },
           { label: "Margin", value: currency(margin) },
         ],
       };
@@ -352,9 +326,7 @@ export default function Reports() {
         { label: "Project" },
         { label: "Assignees" },
         { label: "Deadline" },
-        { label: "Priority" },
         { label: "Status" },
-        { label: "Estimated (h)" },
         { label: "Logged (h)" },
       ];
       const data = db.tasks.map((t) => {
@@ -366,9 +338,7 @@ export default function Reports() {
           db.projects.find((p) => p.id === t.projectId)?.name ?? "—",
           t.assigneeIds.map((id) => nameOf(id).split(" ")[0]).join(", ") || "Unassigned",
           fmtShortDate(t.deadline),
-          t.priority,
           t.status,
-          t.estimatedHours,
           Math.round(logged * 10) / 10,
         ];
       });
@@ -396,7 +366,6 @@ export default function Reports() {
         { label: "Description" },
         { label: "Category" },
         { label: "Submitted by" },
-        { label: "Project" },
         { label: "Amount", money: true },
         { label: "Status" },
       ];
@@ -409,11 +378,10 @@ export default function Reports() {
           e.description,
           e.category,
           nameOf(e.employeeId),
-          db.projects.find((p) => p.id === e.projectId)?.code ?? "—",
           e.amount,
           e.status,
         ]);
-      const paid = data.filter((r) => r[7] === "paid").reduce((s, r) => s + Number(r[6]), 0);
+      const paid = data.filter((r) => r[6] === "paid").reduce((s, r) => s + Number(r[5]), 0);
       return {
         columns: cols,
         rows: data,
@@ -421,9 +389,9 @@ export default function Reports() {
         subtitle: `${data.length} records · ${currency(paid)} paid`,
         summary: [
           { label: "Records", value: String(data.length) },
-          { label: "Total", value: currency(data.reduce((s, r) => s + Number(r[6]), 0)) },
+          { label: "Total", value: currency(data.reduce((s, r) => s + Number(r[5]), 0)) },
           { label: "Paid", value: currency(paid) },
-          { label: "Pending", value: String(data.filter((r) => r[7] === "pending").length) },
+          { label: "Pending", value: String(data.filter((r) => r[6] === "pending").length) },
         ],
       };
     }
@@ -569,11 +537,6 @@ export default function Reports() {
               </tbody>
             </table>
             {rows.length === 0 && <p className="panel-empty">No data for this period.</p>}
-          </div>
-
-          <div className="report-foot">
-            <span>{rows.length} rows · generated {fmtDate(todayISO())}</span>
-            <span className="panel-hint">Exports include every row shown, respecting the selected period.</span>
           </div>
         </section>
       </div>

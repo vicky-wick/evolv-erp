@@ -223,12 +223,6 @@ export default function Tasks() {
           icon={<CheckCircle2 size={15} />}
         />
         <Stat
-          label="Hours logged"
-          value={`${Math.round(db.timesheets.filter((t) => t.status === "approved").reduce((s, t) => s + t.hours, 0))}h`}
-          sub="Approved timesheets"
-          icon={<Clock size={15} />}
-        />
-        <Stat
           label="Pending timesheets"
           value={pendingTimesheets.length}
           sub="Need manager approval"
@@ -274,7 +268,7 @@ export default function Tasks() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>Task</th><th>Project</th><th>Assignees</th><th>Deadline</th><th>Priority</th><th>Status</th><th>Hours</th><th />
+                  <th>Task</th><th>Project</th><th>Assignees</th><th>Deadline</th><th>Status</th><th />
                 </tr>
               </thead>
               <tbody>
@@ -300,9 +294,7 @@ export default function Tasks() {
                         </div>
                       </td>
                       <td className={overdue ? "overdue" : ""}>{fmtShortDate(t.deadline)}</td>
-                      <td><StatusBadge status={t.priority} /></td>
                       <td><StatusBadge status={t.status} /></td>
-                      <td className="cell-muted">{loggedFor(t.id)}h / {t.estimatedHours}h</td>
                       <td className="cell-cta">Open →</td>
                     </tr>
                   );
