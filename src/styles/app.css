@@ -1878,8 +1878,8 @@
   position: relative;
   display: grid;
   place-items: center;
-  aspect-ratio: 1 / 1;
-  max-height: 30px;
+  height: 28px;
+  width: 100%;
   border-radius: 7px;
   border: 1px solid transparent;
   background: var(--surface);
