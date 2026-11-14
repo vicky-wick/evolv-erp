@@ -5,6 +5,7 @@ import {
   Pencil,
   Plus,
   Target,
+  Trash2,
   Users,
   Wallet,
 } from "lucide-react";
@@ -23,6 +24,7 @@ import {
 import type { Project, ProjectStatus } from "../types";
 import { currency, fmtDate, pct, todayISO, addDays } from "../lib/format";
 import { projectStats } from "../lib/calc";
+import { canDeleteRecord } from "../lib/permissions";
 import { Link } from "react-router-dom";
 
 const CATEGORIES = [
@@ -236,6 +238,18 @@ export default function Projects() {
         footer={
           selected && (
             <>
+              {canDeleteRecord(user!.role, "project") && (
+                <button
+                  className="btn btn-ghost btn-sm link-danger"
+                  onClick={() => {
+                    if (window.confirm(`Delete project ${selected.code}? Only possible when it has no tasks left.`)) {
+                      actions.deleteProject(selected.id);
+                    }
+                  }}
+                >
+                  <Trash2 size={13} /> Delete
+                </button>
+              )}
               <span className="modal-foot-hint">
                 Progress, hours and spend update live from tasks, timesheets and expenses.
               </span>

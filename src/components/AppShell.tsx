@@ -13,7 +13,8 @@ import {
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Mark } from "./Mark";
 import { ThemeToggle } from "./ThemeToggle";
-import { modules } from "../data/modules";
+import { NAV_GROUPS, modules } from "../data/modules";
+import { NotificationBell } from "./Notifications";
 import { useStore } from "../data/store";
 import { canAccess } from "../lib/calc";
 import { Avatar } from "./ui";
@@ -88,10 +89,15 @@ export default function AppShell() {
 
   if (!user) return null;
 
-  const navItems = [
-    ...modules.map((m) => ({ id: m.id, name: m.name, short: m.short, icon: m.icon })),
-    { id: "settings", name: "Settings", short: "Settings", icon: Settings2 },
-  ].filter((item) => canAccess(user.role, item.id as never));
+  const allowed = (id: string) => canAccess(user.role, id as never);
+  const moduleById = new Map(modules.map((m) => [m.id, m]));
+  const groups = NAV_GROUPS.map((g) => ({
+    label: g.label,
+    items: g.modules
+      .filter(allowed)
+      .map((id) => moduleById.get(id))
+      .filter((m): m is (typeof modules)[number] => Boolean(m)),
+  })).filter((g) => g.items.length > 0);
 
   const demoAccounts = db.employees.filter((e) => e.status !== "exited");
 
@@ -116,6 +122,7 @@ export default function AppShell() {
 
         <div className="shell-topbar-actions">
           <ThemeToggle className="theme-toggle-sm" />
+          <NotificationBell variant="top" />
           <button
             className="shell-topbar-avatar"
             aria-label="Open navigation and account menu"
@@ -141,7 +148,7 @@ export default function AppShell() {
             <span className="brand-name">Evolve</span>
             <span className="brand-chip">ERP</span>
           </Link>
-          <ThemeToggle className="theme-toggle-sm" />
+          <NotificationBell variant="side" />
           <button
             ref={closeRef}
             className="shell-drawer-close"
@@ -153,17 +160,35 @@ export default function AppShell() {
         </div>
 
         <nav className="shell-nav">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.id}
-              to={`/app/${item.id}`}
-              onClick={() => setNavOpen(false)}
-              className={({ isActive }) => `shell-nav-item${isActive ? " active" : ""}`}
-            >
-              <item.icon size={16} strokeWidth={1.8} />
-              <span>{item.short ?? item.name}</span>
-            </NavLink>
+          {groups.map((group) => (
+            <div className="shell-nav-group" key={group.label}>
+              <div className="shell-nav-label">{group.label}</div>
+              {group.items.map((item) => (
+                <NavLink
+                  key={item.id}
+                  to={`/app/${item.id}`}
+                  onClick={() => setNavOpen(false)}
+                  className={({ isActive }) => `shell-nav-item${isActive ? " active" : ""}`}
+                >
+                  <item.icon size={16} strokeWidth={1.8} />
+                  <span>{item.short ?? item.name}</span>
+                </NavLink>
+              ))}
+            </div>
           ))}
+          {allowed("settings") && (
+            <div className="shell-nav-group">
+              <div className="shell-nav-label">Admin</div>
+              <NavLink
+                to="/app/settings"
+                onClick={() => setNavOpen(false)}
+                className={({ isActive }) => `shell-nav-item${isActive ? " active" : ""}`}
+              >
+                <Settings2 size={16} strokeWidth={1.8} />
+                <span>Settings</span>
+              </NavLink>
+            </div>
+          )}
         </nav>
 
         <div className="shell-demo-note">
@@ -261,6 +286,10 @@ export default function AppShell() {
                     </div>
                   </>
                 )}
+                <div className="user-menu-theme">
+                  <span>Appearance</span>
+                  <ThemeToggle className="theme-toggle-sm" />
+                </div>
                 <button
                   className="user-menu-signout"
                   onClick={() => {

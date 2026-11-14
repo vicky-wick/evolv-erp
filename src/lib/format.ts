@@ -128,6 +128,21 @@ export const relativeDays = (iso: string): string => {
   return `${Math.abs(diff)} days ago`;
 };
 
+/** Human "time ago" for full ISO timestamps (activity feed, notifications). */
+export const relativeTime = (iso: string): string => {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "—";
+  const diffMs = Date.now() - t;
+  const minutes = Math.round(diffMs / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return fmtDate(iso.slice(0, 10));
+};
+
 export const uid = (prefix = "id"): string =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 

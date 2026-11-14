@@ -29,16 +29,16 @@ export const modules: ModuleDef[] = [
     icon: LayoutDashboard,
   },
   {
-    id: "hr",
-    name: "HR & Employees",
-    tagline: "One clean record per employee — offer letter to exit.",
-    icon: Users,
-  },
-  {
     id: "attendance",
     name: "Attendance & Leave",
     tagline: "Check-ins, breaks and leave policies that run themselves.",
     icon: CalendarCheck2,
+  },
+  {
+    id: "hr",
+    name: "HR & Employees",
+    tagline: "One clean record per employee — offer letter to exit.",
+    icon: Users,
   },
   {
     id: "projects",
@@ -83,4 +83,13 @@ export const modules: ModuleDef[] = [
     tagline: "HR, operations and finance — exportable to PDF, Excel or CSV.",
     icon: BarChart3,
   },
+];
+
+/** Sidebar sections — fewer items visible at once, grouped by purpose. */
+export const NAV_GROUPS: { label: string; modules: string[] }[] = [
+  { label: "Overview", modules: ["dashboard"] },
+  { label: "People", modules: ["attendance", "hr"] },
+  { label: "Work", modules: ["projects", "tasks"] },
+  { label: "Money", modules: ["payroll", "finance"] },
+  { label: "Operations", modules: ["assets", "approvals", "reports"] },
 ];

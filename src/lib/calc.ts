@@ -458,28 +458,24 @@ export function monthlySeries(
 }
 
 /* ============================================================
-   Role permissions
+   Role permissions — single source of truth lives in
+   ../lib/permissions.ts; re-exported here for compatibility.
    ============================================================ */
 
+export {
+  MODULE_ACCESS,
+  ROLE_LABEL,
+  ROLE_INFO,
+  ROLE_ORDER,
+  canAccess,
+  canChangeRoles,
+  canAssignRole,
+  canDeleteRecord,
+  canManageWork,
+  canApproveExpenses,
+  payrollStageRole,
+} from "./permissions";
 import type { ModuleId, Role } from "../types";
-
-export const MODULE_ACCESS: Record<ModuleId, Role[]> = {
-  dashboard: ["admin", "hr", "finance", "manager", "employee"],
-  hr: ["admin", "hr"],
-  attendance: ["admin", "hr", "finance", "manager", "employee"],
-  projects: ["admin", "hr", "finance", "manager", "employee"],
-  tasks: ["admin", "hr", "finance", "manager", "employee"],
-  payroll: ["admin", "hr", "finance", "manager", "employee"],
-  finance: ["admin", "finance", "employee", "manager"],
-  assets: ["admin", "hr", "finance", "manager", "employee"],
-  approvals: ["admin", "hr", "finance", "manager"],
-  reports: ["admin", "hr", "finance", "manager"],
-  settings: ["admin", "hr"],
-};
-
-export function canAccess(role: Role, moduleId: ModuleId): boolean {
-  return MODULE_ACCESS[moduleId].includes(role);
-}
 
 /* leave types that deduct balance */
 export function isPaidLeave(type: LeaveType): boolean {

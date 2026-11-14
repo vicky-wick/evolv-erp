@@ -7,6 +7,7 @@ import {
   ListChecks,
   MessageSquare,
   Plus,
+  Trash2,
   Users,
   X,
 } from "lucide-react";
@@ -24,6 +25,7 @@ import {
   Tabs,
 } from "../components/ui";
 import type { Task, TaskStatus, Timesheet } from "../types";
+import { canDeleteRecord } from "../lib/permissions";
 import {
   addDays,
   currency,
@@ -469,6 +471,23 @@ export default function Tasks() {
         footer={
           selected && (
             <>
+              {canDeleteRecord(user!.role, "task") && (
+                <button
+                  className="btn btn-ghost btn-sm link-danger"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Delete task ${selected.code}? Its timesheet entries are removed too. This can't be undone.`
+                      )
+                    ) {
+                      actions.deleteTask(selected.id);
+                      setSelectedId(null);
+                    }
+                  }}
+                >
+                  <Trash2 size={13} /> Delete
+                </button>
+              )}
               <button className="btn btn-ghost btn-sm" onClick={() => openTimeFor(selected)}>
                 <Clock size={13} /> Log time
               </button>

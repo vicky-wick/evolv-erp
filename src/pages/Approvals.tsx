@@ -7,6 +7,7 @@ import {
   Filter,
   History,
   ShieldCheck,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -23,6 +24,7 @@ import {
   Tabs,
 } from "../components/ui";
 import { approvalKindLabel, pendingApprovals, type ApprovalKind } from "../lib/approvals";
+import { canDeleteRecord } from "../lib/permissions";
 import type { CompanyDocument, Role } from "../types";
 import { addDays, currency, fmtDate, fmtDateTime, monthLabel, relativeDays, todayISO } from "../lib/format";
 
@@ -347,6 +349,19 @@ export default function Approvals() {
           selectedDoc &&
           canManageDocs && (
             <>
+              {canDeleteRecord(user.role, "document") && (
+                <button
+                  className="btn btn-ghost btn-sm link-danger"
+                  onClick={() => {
+                    if (window.confirm(`Delete document “${selectedDoc.name}”? This can't be undone.`)) {
+                      actions.deleteDocument(selectedDoc.id);
+                      setSelectedDocId(null);
+                    }
+                  }}
+                >
+                  <Trash2 size={13} /> Delete
+                </button>
+              )}
               <span className="modal-foot-hint">Version history is preserved.</span>
               <button
                 className="btn btn-ghost btn-sm"

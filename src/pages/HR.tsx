@@ -3,8 +3,8 @@ import {
   Building2,
   CreditCard,
   FileText,
+  Link2,
   Plus,
-  Printer,
   Search,
   UserPlus,
   Users,
@@ -22,6 +22,7 @@ import {
   Tabs,
 } from "../components/ui";
 import type { Employee, SalaryStructure } from "../types";
+import { ROLE_INFO, ROLE_LABEL } from "../lib/permissions";
 import { currency, fmtDate } from "../lib/format";
 
 const grossLabel = (s: SalaryStructure): number => s.basic + s.hra + s.allowances;
@@ -79,7 +80,7 @@ function printIdCard(emp: Employee, dept?: string, manager?: string) {
 const emptySalary = (): SalaryStructure => ({ basis: "monthly", basic: 20000, hra: 9000, allowances: 9000 });
 
 export default function HR() {
-  const { db, user, actions } = useStore();
+  const { db, user, actions, toast } = useStore();
   const [tab, setTab] = useState("employees");
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState("all");
@@ -91,13 +92,13 @@ export default function HR() {
   const [showRevise, setShowRevise] = useState(false);
   const [docForm, setDocForm] = useState({ name: "", fileName: "", expiry: "" });
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(() => ({
     name: "",
     email: "",
     phone: "",
     designation: "",
-    departmentId: "d-dev",
-    managerId: "emp-rahul",
+    departmentId: db.departments[0]?.id ?? "",
+    managerId: "",
     employmentType: "full-time" as Employee["employmentType"],
     joiningDate: "",
     role: "employee" as Employee["role"],
@@ -105,7 +106,7 @@ export default function HR() {
     pan: "",
     address: "",
     salary: emptySalary(),
-  });
+  }));
 
   const [editForm, setEditForm] = useState({
     name: "",
@@ -176,6 +177,16 @@ export default function HR() {
       return;
     }
     actions.updateEmployee(emp.id, { status });
+  };
+
+  const copyInviteLink = (emp: Employee) => {
+    const link = `${window.location.origin}/login?join=1&email=${encodeURIComponent(emp.email)}`;
+    void navigator.clipboard
+      ?.writeText(link)
+      .then(() => toast(`${emp.name}'s invite link copied — send it to ${emp.email}.`))
+      .catch(() => {
+        window.prompt("Copy this invite link:", link);
+      });
   };
 
   const gross = form.salary.basic + form.salary.hra + form.salary.allowances;
@@ -377,12 +388,14 @@ export default function HR() {
           <Field label="Joining date"><input className="input" type="date" value={form.joiningDate} onChange={(e) => setForm({ ...form, joiningDate: e.target.value })} /></Field>
           <Field label="Department">
             <select className="select" value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })}>
+              {db.departments.length === 0 && <option value="">Create a department first</option>}
               {db.departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
           </Field>
-          <Field label="Reporting manager">
+          <Field label="Reporting manager" hint="Optional — leave empty if they report to you">
             <select className="select" value={form.managerId} onChange={(e) => setForm({ ...form, managerId: e.target.value })}>
-              {db.employees.filter((e) => e.status !== "exited").map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+              <option value="">No manager</option>
+              {db.employees.filter((e) => e.status !== "exited").map((e) => <option key={e.id} value={e.id}>{e.name} — {e.designation}</option>)}
             </select>
           </Field>
           <Field label="Employment type">
@@ -390,9 +403,17 @@ export default function HR() {
               {["full-time", "part-time", "intern", "freelancer", "contractual", "probationary"].map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </Field>
-          <Field label="System role">
+          <Field
+            label="System role"
+            hint="What this person can open in the app. New people usually stay Employee."
+          >
             <select className="select" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Employee["role"] })}>
-              {["employee", "manager", "hr", "finance", "admin"].map((r) => <option key={r} value={r}>{r}</option>)}
+              {(user?.role === "admin"
+                ? (["employee", "manager", "hr", "finance", "admin"] as const)
+                : (["employee", "manager", "hr", "finance"] as const)
+              ).map((r) => (
+                <option key={r} value={r}>{ROLE_LABEL[r]}{ROLE_INFO[r] ? ` — ${ROLE_INFO[r].summary}` : ""}</option>
+              ))}
             </select>
           </Field>
           <Field label="PAN"><input className="input" value={form.pan} onChange={(e) => setForm({ ...form, pan: e.target.value })} /></Field>
@@ -420,6 +441,11 @@ export default function HR() {
               <button className="btn btn-ghost btn-sm" onClick={() => printIdCard(selected, deptName(selected.departmentId), empName(selected.managerId))}>
                 <CreditCard size={14} /> ID card
               </button>
+              {selected.status !== "exited" && (
+                <button className="btn btn-ghost btn-sm" onClick={() => copyInviteLink(selected)}>
+                  <Link2 size={14} /> Invite link
+                </button>
+              )}
               {selected.status !== "exited" && (
                 <select
                   className="select select-sm"
@@ -614,8 +640,18 @@ export default function HR() {
           <Field label="Phone"><input className="input" value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} /></Field>
           <Field label="Designation"><input className="input" value={editForm.designation} onChange={(e) => setEditForm({ ...editForm, designation: e.target.value })} /></Field>
           <Field label="System role">
-            <select className="select" value={editForm.role} onChange={(e) => setEditForm({ ...editForm, role: e.target.value as Employee["role"] })}>
-              {["employee", "manager", "hr", "finance", "admin"].map((r) => <option key={r} value={r}>{r}</option>)}
+            <select
+              className="select"
+              value={editForm.role}
+              disabled={user?.role !== "admin"}
+              onChange={(e) => setEditForm({ ...editForm, role: e.target.value as Employee["role"] })}
+            >
+              {(user?.role === "admin"
+                ? (["employee", "manager", "hr", "finance", "admin"] as const)
+                : (["employee", "manager", "hr", "finance"] as const)
+              ).map((r) => (
+                <option key={r} value={r}>{ROLE_LABEL[r]}</option>
+              ))}
             </select>
           </Field>
           <Field label="Department">

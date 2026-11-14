@@ -126,6 +126,11 @@ export default function Onboarding() {
                   )}
                 </button>
 
+                <p className="onboard-alt">
+                  Was invited to a company that already uses Evolve?{" "}
+                  <Link to="/login?join=1">Join your team instead</Link>
+                </p>
+
                 <div className="onboard-benefits">
                   {benefits.map((benefit) => (
                     <div key={benefit} className="onboard-benefit">

@@ -410,6 +410,32 @@ export interface CompanyDocument {
   versions: DocumentVersion[];
 }
 
+/* ---------------- Activity log ---------------- */
+
+export type ActivityAction =
+  | "created"
+  | "updated"
+  | "approved"
+  | "rejected"
+  | "deleted"
+  | "submitted"
+  | "login-note";
+
+export interface ActivityEntry {
+  id: string;
+  at: string;
+  actorId: string;
+  actorRole: Role;
+  actorName: string;
+  action: ActivityAction;
+  /** which module the record belongs to, e.g. "tasks", "payroll", "settings" */
+  entity: string;
+  entityId: string;
+  /** human label of the record, e.g. "T-014 · Design homepage" */
+  label: string;
+  detail?: string;
+}
+
 /* ---------------- Settings ---------------- */
 
 export interface Settings {
@@ -458,6 +484,7 @@ export interface DB {
   assets: Asset[];
   documents: CompanyDocument[];
   salaryRevisions: SalaryRevision[];
+  activity: ActivityEntry[];
   settings: Settings;
   sessionEmployeeId: string | null;
 }

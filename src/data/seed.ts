@@ -1932,6 +1932,7 @@ export function buildSeedDB(): DB {
     assets,
     documents,
     salaryRevisions,
+    activity: [],
     settings,
     sessionEmployeeId: null,
   };

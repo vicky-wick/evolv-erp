@@ -16,19 +16,17 @@ import {
 import { useStore } from "../data/store";
 import {
   financeSummary,
-  isPaidLeave,
   lineIncentives,
   monthlySeries,
   summarizeMonth,
   workedMinutes,
 } from "../lib/calc";
-import { MonthlyChart, TrendBars } from "../components/charts";
-import { Avatar, Badge, PageHeader, Progress, Stat, StatusBadge } from "../components/ui";
+import { MonthlyChart } from "../components/charts";
+import { Badge, PageHeader, Progress, Stat, StatusBadge } from "../components/ui";
 import {
   addDays,
   currency,
   currencyCompact,
-  fmtDate,
   fmtShortDate,
   hoursLabel,
   isWeekend,
@@ -82,43 +80,19 @@ export default function Dashboard() {
   const myHours = db.timesheets
     .filter((t) => t.employeeId === user.id && t.status === "approved" && monthKey(t.date) === month)
     .reduce((s, t) => s + t.hours, 0);
-  const leaveAvailable = isPaidLeave("casual")
-    ? user.leaveBalance.casual + user.leaveBalance.sick + user.leaveBalance.earned
-    : 0;
+  const leaveAvailable = user.leaveBalance.casual + user.leaveBalance.sick + user.leaveBalance.earned;
   const presentToday = new Set(
     db.attendance.filter((a) => a.date === today && a.checkIn).map((a) => a.employeeId)
   );
   const teamPresentToday = [...teamIds].filter((id) => presentToday.has(id)).length;
 
-  /* attendance trend — last 10 weekdays */
-  const trendDates: string[] = [];
-  let cursor = today;
-  while (trendDates.length < 10) {
-    if (!isWeekend(cursor)) trendDates.unshift(cursor);
-    cursor = addDays(cursor, -1);
-  }
-  const trendValues = trendDates.map((d) => {
-    const ids = new Set(db.attendance.filter((a) => a.date === d && a.checkIn).map((a) => a.employeeId));
-    return teamIds.size ? [...ids].filter((id) => teamIds.has(id)).length : ids.size;
-  });
-
   const workedToday = todayRec
     ? workedMinutes({ ...todayRec, checkOut: todayRec.checkOut ?? clock })
     : 0;
 
-  const expiring = [
-    ...db.documents
-      .filter((d) => d.expiry && d.expiry >= today && d.expiry <= addDays(today, 45))
-      .map((d) => ({ label: d.name, date: d.expiry!, kind: "Document" })),
-    ...db.assets
-      .filter((a) => a.warrantyUntil >= today && a.warrantyUntil <= addDays(today, 45) && a.status !== "disposed")
-      .map((a) => ({ label: `${a.name} warranty`, date: a.warrantyUntil, kind: "Asset" })),
-    ...db.employees.flatMap((e) =>
-      e.documents
-        .filter((d) => d.expiry && d.expiry >= today && d.expiry <= addDays(today, 45))
-        .map((d) => ({ label: `${e.name} — ${d.name}`, date: d.expiry!, kind: "Employee" }))
-    ),
-  ].slice(0, 4);
+  const nextHoliday = db.settings.holidays
+    .filter((h) => h.date >= today)
+    .sort((a, b) => a.date.localeCompare(b.date))[0];
 
   const stats: { label: string; value: string; sub: string; icon: ReactNode }[] =
     user.role === "admin"
@@ -409,133 +383,93 @@ export default function Dashboard() {
           )}
         </section>
 
-        {/* Projects */}
-        <section className="panel">
-          <div className="panel-head">
-            <h2>Projects in flight</h2>
-            <Link to="/app/projects" className="panel-link">
-              All projects <ArrowRight size={13} />
-            </Link>
-          </div>
-          <div className="list">
-            {activeProjects.slice(0, 4).map((p) => {
-              const total = db.tasks.filter((t) => t.projectId === p.id).length;
-              const done = db.tasks.filter(
-                (t) => t.projectId === p.id && ["approved", "completed"].includes(t.status)
-              ).length;
-              const progress = total ? Math.round((done / total) * 100) : 0;
-              const manager = db.employees.find((e) => e.id === p.managerId);
-              return (
-                <div className="list-row project-row" key={p.id}>
-                  <div className="project-main">
-                    <strong>{p.name}</strong>
-                    <small>
-                      {p.code} · {manager?.name} · due {fmtShortDate(p.deadline)}
-                    </small>
-                    <Progress value={progress} />
-                  </div>
-                  <div className="project-side">
-                    <StatusBadge status={p.status} />
-                    <span>{progress}%</span>
-                  </div>
+        {/* Second panel is role-specific and calm: money for finance, work for
+            managers, a friendly rhythm for everyone else. */}
+        {["admin", "finance", "hr", "manager"].includes(user.role) ? (
+          ["admin", "finance"].includes(user.role) ? (
+            <section className="panel">
+              <div className="panel-head">
+                <h2>Income vs expenses</h2>
+                <Link to="/app/reports" className="panel-link">
+                  Reports <ArrowRight size={13} />
+                </Link>
+              </div>
+              <MonthlyChart
+                series={monthlySeries(db.incomes, db.expenses, listMonths(6))}
+              />
+              <div className="trend-foot">
+                <span>Net this period</span>
+                <strong className={finance.netProfit >= 0 ? "pos" : "neg"}>
+                  {currency(finance.netProfit)}
+                </strong>
+              </div>
+            </section>
+          ) : (
+            <section className="panel">
+              <div className="panel-head">
+                <h2>Projects in flight</h2>
+                <Link to="/app/projects" className="panel-link">
+                  All projects <ArrowRight size={13} />
+                </Link>
+              </div>
+              {activeProjects.length ? (
+                <div className="list">
+                  {activeProjects.slice(0, 4).map((p) => {
+                    const total = db.tasks.filter((t) => t.projectId === p.id).length;
+                    const done = db.tasks.filter(
+                      (t) => t.projectId === p.id && ["approved", "completed"].includes(t.status)
+                    ).length;
+                    const progress = total ? Math.round((done / total) * 100) : 0;
+                    const manager = db.employees.find((e) => e.id === p.managerId);
+                    return (
+                      <div className="list-row project-row" key={p.id}>
+                        <div className="project-main">
+                          <strong>{p.name}</strong>
+                          <small>
+                            {p.code} · {manager?.name} · due {fmtShortDate(p.deadline)}
+                          </small>
+                          <Progress value={progress} />
+                        </div>
+                        <div className="project-side">
+                          <StatusBadge status={p.status} />
+                          <span>{progress}%</span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* Trend */}
-        <section className="panel">
-          <div className="panel-head">
-            <h2>{user.role === "employee" ? "Team attendance" : "Attendance trend"}</h2>
-            <span className="panel-hint">Last 10 working days</span>
-          </div>
-          <TrendBars
-            values={trendValues}
-            labels={trendDates.map((d) => fmtShortDate(d))}
-          />
-          <div className="trend-foot">
-            <span>{teamIds.size ? "Your team" : "Company"} check-ins per day</span>
-            <strong>{trendValues[trendValues.length - 1] ?? 0} today</strong>
-          </div>
-        </section>
-
-        {/* Finance or holidays */}
-        {["admin", "finance"].includes(user.role) ? (
-          <section className="panel">
-            <div className="panel-head">
-              <h2>Income vs expenses</h2>
-              <Link to="/app/reports" className="panel-link">
-                Reports <ArrowRight size={13} />
-              </Link>
-            </div>
-            <MonthlyChart
-              series={monthlySeries(db.incomes, db.expenses, listMonths(6))}
-            />
-            <div className="trend-foot">
-              <span>Net this period</span>
-              <strong className={finance.netProfit >= 0 ? "pos" : "neg"}>
-                {currency(finance.netProfit)}
-              </strong>
-            </div>
-          </section>
+              ) : (
+                <p className="panel-empty">No active projects right now.</p>
+              )}
+            </section>
+          )
         ) : (
           <section className="panel">
             <div className="panel-head">
-              <h2>Upcoming holidays</h2>
+              <h2>Coming up</h2>
               <span className="panel-hint">{db.settings.org.name}</span>
             </div>
             <div className="holiday-list">
-              {db.settings.holidays
-                .filter((h) => h.date >= today)
-                .slice(0, 4)
-                .map((h) => (
-                  <div key={h.date} className="holiday-row">
-                    <span className="holiday-date">
-                      {new Date(h.date + "T00:00:00").toLocaleDateString("en-IN", {
-                        day: "2-digit",
-                        month: "short",
-                      })}
-                    </span>
-                    <span className="holiday-name">
-                      <PartyPopper size={13} /> {h.name}
-                    </span>
-                    <small>{relativeDays(h.date)}</small>
-                  </div>
-                ))}
+              {nextHoliday ? (
+                <div className="holiday-row">
+                  <span className="holiday-date">
+                    {new Date(nextHoliday.date + "T00:00:00").toLocaleDateString("en-IN", {
+                      day: "2-digit",
+                      month: "short",
+                    })}
+                  </span>
+                  <span className="holiday-name">
+                    <PartyPopper size={13} /> {nextHoliday.name}
+                  </span>
+                  <small>{relativeDays(nextHoliday.date)}</small>
+                </div>
+              ) : (
+                <p className="panel-empty">No upcoming holidays on the calendar.</p>
+              )}
             </div>
           </section>
         )}
       </div>
-
-      {["admin", "hr", "finance"].includes(user.role) && expiring.length > 0 && (
-        <section className="panel">
-          <div className="panel-head">
-            <h2>Expiry reminders</h2>
-            <Link to="/app/approvals" className="panel-link">
-              Documents <ArrowRight size={13} />
-            </Link>
-          </div>
-          <div className="expiry-grid">
-            {expiring.map((e) => (
-              <div className="expiry-row" key={e.label}>
-                <FileWarning size={15} />
-                <div>
-                  <strong>{e.label}</strong>
-                  <small>
-                    {e.kind} · expires {fmtDate(e.date)}
-                  </small>
-                </div>
-                <Badge tone="amber">{relativeDays(e.date)}</Badge>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <p className="dash-foot">
-        Data refreshed live from the workspace · {new Date().toLocaleTimeString("en-IN")}
-      </p>
     </div>
   );
 }

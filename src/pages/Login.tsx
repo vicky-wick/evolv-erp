@@ -9,8 +9,9 @@ import {
   Mail,
   ShieldCheck,
   User,
+  Users,
 } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Mark } from "../components/Mark";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { Avatar } from "../components/ui";
@@ -29,12 +30,18 @@ const roleLabel: Record<string, string> = {
 const demoIds = ["emp-aarav", "emp-neha", "emp-rohit", "emp-rahul", "emp-sneha"];
 
 type LoginMode = "signin" | "signup" | "forgot";
+type SignUpIntent = "create" | "join";
 
 export default function Login() {
   const { db, user, actions, authMode, authReady, authError, authUserEmail, orgs } = useStore();
   const navigate = useNavigate();
-  const [mode, setMode] = useState<LoginMode>("signin");
-  const [email, setEmail] = useState("");
+  const [params] = useSearchParams();
+  /* Invite links land here: /login?join=1&email=you@company.com */
+  const invited =
+    params.get("join") === "1" || params.get("invite") === "1" ? true : false;
+  const [mode, setMode] = useState<LoginMode>(invited ? "signup" : "signin");
+  const [intent, setIntent] = useState<SignUpIntent>(invited ? "join" : "create");
+  const [email, setEmail] = useState(params.get("email") ?? "");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [orgName, setOrgName] = useState("");
@@ -63,6 +70,11 @@ export default function Login() {
     setError(null);
     setNotice(null);
     setResetSent(false);
+  };
+
+  const switchIntent = (next: SignUpIntent) => {
+    setIntent(next);
+    setError(null);
   };
 
   const submit = async (
@@ -98,7 +110,7 @@ export default function Login() {
         setError("Enter your full name.");
         return;
       }
-      if (!orgName.trim()) {
+      if (intent === "create" && !orgName.trim()) {
         setError("Give your organization a name.");
         return;
       }
@@ -111,10 +123,15 @@ export default function Login() {
         setError("Choose a password with at least 6 characters.");
         return;
       }
+      if (isDemo) {
+        setError("This demo runs offline. Sign in with one of the demo accounts instead.");
+        return;
+      }
       setLoading(true);
       try {
         const result = await actions.signUp({
           name: name.trim(),
+          intent,
           orgName: orgName.trim(),
           email: mail,
           password,
@@ -181,8 +198,11 @@ export default function Login() {
       sub: "Your agency operating system — people, work, money, all in one place.",
     },
     signup: {
-      title: "Create your workspace",
-      sub: "Set up an organization in minutes — invite your team after signup.",
+      title: intent === "create" ? "Create your workspace" : "Join your team",
+      sub:
+        intent === "create"
+          ? "Set up an organization in minutes — invite your team after signup."
+          : "Use the exact work email your administrator added in HR. We'll link you to the right workspace.",
     },
     forgot: {
       title: "Reset your password",
@@ -223,6 +243,33 @@ export default function Login() {
               </div>
             ) : (
               <form onSubmit={submit} noValidate>
+                {mode === "signup" && !isDemo && (
+                  <div className="auth-intent" role="radiogroup" aria-label="What brings you here">
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={intent === "create"}
+                      className={`auth-intent-card${intent === "create" ? " selected" : ""}`}
+                      onClick={() => switchIntent("create")}
+                    >
+                      <Building2 size={18} />
+                      <strong>I'm setting up my company</strong>
+                      <small>Create a new workspace and become its administrator</small>
+                    </button>
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={intent === "join"}
+                      className={`auth-intent-card${intent === "join" ? " selected" : ""}`}
+                      onClick={() => switchIntent("join")}
+                    >
+                      <Users size={18} />
+                      <strong>I'm joining my team</strong>
+                      <small>My company already uses Evolve — I was invited</small>
+                    </button>
+                  </div>
+                )}
+
                 {mode === "signup" && (
                   <>
                     <label className="auth-field">
@@ -241,22 +288,30 @@ export default function Login() {
                         />
                       </div>
                     </label>
-                    <label className="auth-field">
-                      <span>Organization name</span>
-                      <div className="auth-input">
-                        <Building2 size={15} />
-                        <input
-                          type="text"
-                          placeholder="Evolve Creative Agency"
-                          value={orgName}
-                          onChange={(e) => {
-                            setOrgName(e.target.value);
-                            if (error) setError(null);
-                          }}
-                          autoComplete="organization"
-                        />
-                      </div>
-                    </label>
+                    {intent === "create" && (
+                      <label className="auth-field">
+                        <span>Organization name</span>
+                        <div className="auth-input">
+                          <Building2 size={15} />
+                          <input
+                            type="text"
+                            placeholder="Evolve Creative Agency"
+                            value={orgName}
+                            onChange={(e) => {
+                              setOrgName(e.target.value);
+                              if (error) setError(null);
+                            }}
+                            autoComplete="organization"
+                          />
+                        </div>
+                      </label>
+                    )}
+                    {intent === "join" && !invited && (
+                      <p className="auth-field-hint">
+                        Ask your administrator to add you under <strong>HR → Employees</strong> first
+                        — your work email must match that record exactly.
+                      </p>
+                    )}
                   </>
                 )}
 
@@ -313,7 +368,13 @@ export default function Login() {
                   {loading ? (
                     <>
                       <Loader2 className="spin" size={16} />
-                      {mode === "signin" ? "Signing in…" : mode === "signup" ? "Creating workspace…" : "Sending link…"}
+                      {mode === "signin"
+                        ? "Signing in…"
+                        : mode === "signup"
+                        ? intent === "create"
+                          ? "Creating workspace…"
+                          : "Joining your team…"
+                        : "Sending link…"}
                     </>
                   ) : (
                     <>
@@ -322,9 +383,15 @@ export default function Login() {
                           Sign in <ArrowRight size={16} />
                         </>
                       ) : mode === "signup" ? (
-                        <>
-                          Create workspace <ArrowRight size={16} />
-                        </>
+                        intent === "create" ? (
+                          <>
+                            Create workspace <ArrowRight size={16} />
+                          </>
+                        ) : (
+                          <>
+                            Join my team <ArrowRight size={16} />
+                          </>
+                        )
                       ) : (
                         "Send reset link"
                       )}
@@ -338,11 +405,17 @@ export default function Login() {
               <div className="login-alt">
                 {mode === "signin" ? (
                   <>
-                    <span>New here?</span>
-                    <button type="button" className="login-link" onClick={() => switchMode("signup")}>
-                      Create a workspace
-                    </button>
-                    <span className="login-dot" aria-hidden="true" />
+                    {isDemo ? (
+                      <span>Demo mode — pick a role on the right</span>
+                    ) : (
+                      <>
+                        <span>New here?</span>
+                        <button type="button" className="login-link" onClick={() => switchMode("signup")}>
+                          Get started
+                        </button>
+                      </>
+                    )}
+                    {!isDemo && <span className="login-dot" aria-hidden="true" />}
                     <button type="button" className="login-link" onClick={() => switchMode("forgot")}>
                       Forgot password?
                     </button>

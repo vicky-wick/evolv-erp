@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import type {
+  ActivityAction,
+  ActivityEntry,
   Asset,
   AttendanceRecord,
   CompanyDocument,
@@ -54,13 +56,21 @@ import {
   SPECS,
   createOrganization,
   ensureOrgSeeded,
+  fetchJoinableOrgs,
   fetchOrgDB,
   fetchOrgs,
+  joinOrganization,
   snapshotOf,
   syncDiff,
   type OrgSummary,
   type Snapshot,
 } from "../lib/backend";
+import {
+  canAssignRole,
+  canChangeRoles,
+  canDeleteRecord,
+  payrollStageRole,
+} from "../lib/permissions";
 
 const DB_KEY = "evolve.erp.db.v1";
 
@@ -78,12 +88,42 @@ function loadDB(): DB {
     const raw = localStorage.getItem(DB_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as DB;
-      if (parsed && Array.isArray(parsed.employees) && parsed.employees.length) return parsed;
+      if (parsed && Array.isArray(parsed.employees) && parsed.employees.length) {
+        /* Older local DBs predate the activity log. */
+        if (!Array.isArray(parsed.activity)) parsed.activity = [];
+        return parsed;
+      }
     }
   } catch {
     /* ignore */
   }
   return buildSeedDB();
+}
+
+/** Append to the workspace activity log (newest first), capped at 400 rows. */
+function pushActivity(
+  draft: DB,
+  actor: { id: string; name: string; role: Role },
+  action: ActivityAction,
+  entity: string,
+  entityId: string,
+  label: string,
+  detail?: string
+): void {
+  if (!Array.isArray(draft.activity)) draft.activity = [];
+  draft.activity.unshift({
+    id: uid("act"),
+    at: new Date().toISOString(),
+    actorId: actor.id,
+    actorRole: actor.role,
+    actorName: actor.name,
+    action,
+    entity,
+    entityId,
+    label,
+    detail,
+  });
+  if (draft.activity.length > 400) draft.activity.length = 400;
 }
 
 /* ---------------- types ---------------- */
@@ -116,7 +156,9 @@ export interface AuthResult {
 
 export interface SignUpInput {
   name: string;
-  orgName: string;
+  /** "create" — start a new organization; "join" — accept an existing invite. */
+  intent: "create" | "join";
+  orgName?: string;
   email: string;
   password: string;
 }
@@ -171,6 +213,7 @@ export interface StoreActions {
     address: string;
   }) => boolean;
   updateEmployee: (id: string, patch: Partial<Employee>) => void;
+  setEmployeeRole: (id: string, role: Role) => void;
   transferEmployee: (id: string, departmentId: string, managerId: string | null) => void;
   addEmployeeDocument: (id: string, name: string, fileName: string, expiry?: string) => void;
   addDepartment: (name: string, headId: string | null) => void;
@@ -185,6 +228,7 @@ export interface StoreActions {
   /* projects & tasks */
   addProject: (input: Omit<Project, "id" | "code" | "createdAt">) => void;
   updateProject: (id: string, patch: Partial<Project>) => void;
+  deleteProject: (id: string) => void;
   addTask: (input: {
     title: string;
     description: string;
@@ -195,6 +239,7 @@ export interface StoreActions {
     estimatedHours: number;
   }) => void;
   updateTask: (id: string, patch: Partial<Task>) => void;
+  deleteTask: (id: string) => void;
   setTaskStatus: (id: string, status: TaskStatus) => void;
   toggleSubtask: (taskId: string, subtaskId: string) => void;
   addTaskComment: (taskId: string, body: string) => void;
@@ -230,6 +275,7 @@ export interface StoreActions {
   }) => boolean;
   decideExpense: (id: string, approve: boolean, note?: string) => void;
   payExpense: (id: string, accountId: string) => void;
+  deleteExpense: (id: string) => void;
   addIncome: (input: {
     source: string;
     category: "project" | "other" | "refund" | "interest";
@@ -268,6 +314,7 @@ export interface StoreActions {
   }) => void;
   addDocumentVersion: (docId: string, fileName: string) => void;
   updateDocumentAccess: (docId: string, roles: Role[]) => void;
+  deleteDocument: (docId: string) => void;
 
   /* settings */
   updateSettings: (patch: DeepPartial<Settings>) => void;
@@ -281,6 +328,7 @@ interface StoreCtx {
   user: Employee | null;
   actions: StoreActions;
   toasts: Toast[];
+  toast: (message: string, tone?: Tone) => void;
   authMode: AuthMode;
   authReady: boolean;
   authError: string | null;
@@ -596,10 +644,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const run = (async () => {
         try {
           const userOrgs = await fetchOrgs(client);
-          setOrgs(userOrgs);
           const normalized = normEmail(email);
           if (normalized) setAuthUserEmail(normalized);
-          if (!userOrgs.length) {
+          let memberships = userOrgs;
+          if (!memberships.length && normalized) {
+            /* Auto-link: HR may have added this email to a workspace while
+               the person had no account yet (invite flow). This also covers
+               sign-ins after confirming the email — signup only links when
+               a session exists. */
+            try {
+              const { data } = await client.auth.getUser();
+              const userId = data.user?.id;
+              if (userId) {
+                const joinables = await fetchJoinableOrgs(client, normalized);
+                for (const org of joinables) {
+                  await joinOrganization(client, userId, org.org_id);
+                }
+                if (joinables.length) {
+                  memberships = await fetchOrgs(client);
+                }
+              }
+            } catch {
+              /* fall through to the onboarding path */
+            }
+          }
+          setOrgs(memberships);
+          if (!memberships.length) {
             /* Authenticated but no workspace yet — onboarding will pick up. */
             setActiveOrgId(null);
             activeOrgRef.current = null;
@@ -607,7 +677,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             return true;
           }
           const stored = localStorage.getItem(`evolve.org.${normalized}`);
-          const target = userOrgs.find((o) => o.id === stored) ?? userOrgs[0];
+          const target = memberships.find((o) => o.id === stored) ?? memberships[0];
           return await activateOrg(client, target.id, email);
         } catch (error) {
           setAuthError(authErrorMessage(error));
@@ -803,11 +873,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       async signUp(input) {
         setAuthError(null);
-        if (!isSupabaseConfigured) {
-          return { ok: false, error: "Sign-up requires the Supabase backend." };
+        const intent = input.intent ?? "create";
+        if (!input.name.trim()) {
+          return { ok: false, error: "Enter your full name." };
         }
-        if (!input.name.trim() || !input.orgName.trim()) {
-          return { ok: false, error: "Your name and organization name are required." };
+        if (intent === "create" && !input.orgName?.trim()) {
+          return { ok: false, error: "Give your organization a name." };
         }
         if (input.password.length < 6) {
           return { ok: false, error: "Use a password with at least 6 characters." };
@@ -830,13 +901,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             return { ok: true, needsConfirmation: true };
           }
           const userId = data.user.id;
+          const userEmail = data.user.email ?? normalized;
+
+          if (intent === "join") {
+            /* Employee signup: match the email to a workspace that added
+               this person in HR, then link the account to it. */
+            const orgs = await fetchJoinableOrgs(client, userEmail);
+            if (!orgs.length) {
+              await client.auth.signOut({ scope: "local" });
+              return {
+                ok: false,
+                error:
+                  "No pending invitation found for this email. Ask your administrator to add you in HR → Employees, then try again.",
+              };
+            }
+            for (const org of orgs) {
+              await joinOrganization(client, userId, org.org_id);
+            }
+            await loadWorkspace(client, userEmail);
+            const orgName = orgs[0].org_name;
+            toast(
+              orgs.length > 1
+                ? `Welcome ${input.name.trim()} — joined ${orgs.length} workspaces.`
+                : `Welcome ${input.name.trim()} — you joined ${orgName}.`
+            );
+            return { ok: true };
+          }
+
           await createOrganization(client, userId, {
-            orgName: input.orgName,
+            orgName: input.orgName!.trim(),
             adminName: input.name,
-            adminEmail: data.user.email ?? normalized,
+            adminEmail: userEmail,
           });
-          await loadWorkspace(client, data.user.email ?? normalized);
-          toast(`Workspace “${input.orgName.trim()}” is ready. Welcome aboard!`);
+          await loadWorkspace(client, userEmail);
+          toast(`Workspace “${input.orgName!.trim()}” is ready. Welcome aboard!`);
           return { ok: true };
         } catch (error) {
           return { ok: false, error: authErrorMessage(error) };
@@ -1083,9 +1181,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           toast("You already have a leave request overlapping these dates.", "error");
           return false;
         }
+        const id = uid("lv");
         mutate((draft) => {
           draft.leaveRequests.unshift({
-            id: uid("lv"),
+            id,
             employeeId: emp.id,
             type: input.type,
             from: input.from,
@@ -1096,6 +1195,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             status: "pending",
             appliedAt: new Date().toISOString(),
           });
+          pushActivity(
+            draft,
+            emp,
+            "submitted",
+            "leave",
+            id,
+            `${input.type} leave · ${days}d`,
+            emp.name
+          );
         });
         toast("Leave request submitted for approval.");
         return true;
@@ -1113,6 +1221,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           target.approverId = actor.id;
           target.decidedAt = new Date().toISOString();
           target.note = note;
+          pushActivity(
+            draft,
+            actor,
+            approve ? "approved" : "rejected",
+            "leave",
+            id,
+            `${target.type} leave · ${target.days}d`,
+            draft.employees.find((e) => e.id === target.employeeId)?.name
+          );
           if (!approve) return;
           const employee = draft.employees.find((e) => e.id === target.employeeId);
           if (!employee) return;
@@ -1148,9 +1265,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           toast("Enter valid check-in and check-out times.", "error");
           return false;
         }
+        const id = uid("cor");
         mutate((draft) => {
           draft.corrections.unshift({
-            id: uid("cor"),
+            id,
             employeeId: emp.id,
             date: input.date,
             checkIn: input.checkIn,
@@ -1159,6 +1277,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             status: "pending",
             appliedAt: new Date().toISOString(),
           });
+          pushActivity(
+            draft,
+            emp,
+            "submitted",
+            "attendance",
+            id,
+            `Correction · ${input.date}`,
+            emp.name
+          );
         });
         toast("Attendance correction request submitted.");
         return true;
@@ -1175,6 +1302,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           target.status = approve ? "approved" : "rejected";
           target.decidedBy = actor.id;
           target.decidedAt = new Date().toISOString();
+          pushActivity(
+            draft,
+            actor,
+            approve ? "approved" : "rejected",
+            "attendance",
+            id,
+            `Correction · ${target.date}`,
+            draft.employees.find((e) => e.id === target.employeeId)?.name
+          );
           if (!approve) return;
           const rec = upsertAttendance(draft, target.employeeId, target.date, {
             checkIn: target.checkIn,
@@ -1200,10 +1336,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           toast("An employee with this email already exists.", "error");
           return false;
         }
+        if (input.role === "admin" && me?.role !== "admin") {
+          toast("Only an administrator can add another administrator.", "error");
+          return false;
+        }
         const code = nextCode("EV", db.employees.map((e) => e.code));
+        const newId = uid("emp");
         mutate((draft) => {
           draft.employees.push({
-            id: uid("emp"),
+            id: newId,
             code,
             name: input.name.trim(),
             email: input.email.trim(),
@@ -1225,17 +1366,88 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             incentivesEnabled: true,
             documents: [],
           });
+          if (me)
+            pushActivity(
+              draft,
+              me,
+              "created",
+              "employees",
+              newId,
+              `${code} · ${input.name.trim()}`,
+              `Joined as ${input.role}`
+            );
         });
-        toast(`${input.name} added as ${code}. Onboarding workflow started.`);
+        toast(`${input.name} added as ${code}. They can now sign up with this email.`);
         return true;
       },
 
       updateEmployee(id, patch) {
+        const emp = db.employees.find((e) => e.id === id);
+        if (!emp) return;
+        /* Role changes flow through setEmployeeRole — enforce there too. */
+        if (patch.role && patch.role !== emp.role) {
+          const guard = canAssignRole(
+            me?.role ?? "employee",
+            emp.role,
+            patch.role,
+            db.employees.filter((e) => e.role === "admin" && e.status !== "exited").length,
+            me?.id === id
+          );
+          if (!guard.ok) {
+            toast(guard.reason ?? "You can't change this role.", "error");
+            return;
+          }
+        }
+        const changes = Object.entries(patch)
+          .filter(([key, value]) => (emp as unknown as Record<string, unknown>)[key] !== value)
+          .map(([key]) => key);
         mutate((draft) => {
-          const emp = draft.employees.find((e) => e.id === id);
-          if (emp) Object.assign(emp, patch);
+          const target = draft.employees.find((e) => e.id === id);
+          if (!target) return;
+          Object.assign(target, patch);
+          if (me && changes.length)
+            pushActivity(
+              draft,
+              me,
+              "updated",
+              "employees",
+              id,
+              `${target.code} · ${target.name}`,
+              `Updated ${changes.join(", ")}`
+            );
         });
         toast("Employee record updated.");
+      },
+
+      setEmployeeRole(id, role) {
+        const emp = db.employees.find((e) => e.id === id);
+        if (!emp || !me) return;
+        const guard = canAssignRole(
+          me.role,
+          emp.role,
+          role,
+          db.employees.filter((e) => e.role === "admin" && e.status !== "exited").length,
+          me.id === id
+        );
+        if (!guard.ok) {
+          toast(guard.reason ?? "You can't change this role.", "error");
+          return;
+        }
+        mutate((draft) => {
+          const target = draft.employees.find((e) => e.id === id);
+          if (!target) return;
+          target.role = role;
+          pushActivity(
+            draft,
+            me,
+            "updated",
+            "employees",
+            id,
+            `${target.code} · ${target.name}`,
+            `Role changed ${emp.role} → ${role}`
+          );
+        });
+        toast(`${emp.name} is now ${role === "admin" ? "an administrator" : `a ${role}`}.`);
       },
 
       transferEmployee(id, departmentId, managerId) {
@@ -1244,6 +1456,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (!emp) return;
           emp.departmentId = departmentId;
           emp.managerId = managerId;
+          if (me)
+            pushActivity(
+              draft,
+              me,
+              "updated",
+              "employees",
+              id,
+              `${emp.code} · ${emp.name}`,
+              "Department / reporting changed"
+            );
         });
         toast("Employee transferred. Reporting updated.");
       },
@@ -1259,14 +1481,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             uploadedAt: new Date().toISOString(),
             expiry,
           });
+          if (me)
+            pushActivity(
+              draft,
+              me,
+              "created",
+              "employees",
+              id,
+              `${emp.code} · ${name}`,
+              "Document attached to employee record"
+            );
         });
         toast("Document attached to employee record.");
       },
 
       addDepartment(name, headId) {
         if (!name.trim()) return;
+        const id = uid("dept");
         mutate((draft) => {
-          draft.departments.push({ id: uid("dept"), name: name.trim(), headId });
+          draft.departments.push({ id, name: name.trim(), headId });
+          if (me) pushActivity(draft, me, "created", "departments", id, name.trim());
         });
         toast(`Department “${name}” created.`);
       },
@@ -1274,7 +1508,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateDepartment(id, patch) {
         mutate((draft) => {
           const dept = draft.departments.find((d) => d.id === id);
-          if (dept) Object.assign(dept, patch);
+          if (!dept) return;
+          Object.assign(dept, patch);
+          if (me) pushActivity(draft, me, "updated", "departments", id, dept.name);
         });
         toast("Department updated.");
       },
@@ -1283,8 +1519,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const emp = db.employees.find((e) => e.id === employeeId);
         if (!emp || !me) return;
         mutate((draft) => {
+          const id = uid("rev");
           draft.salaryRevisions.unshift({
-            id: uid("rev"),
+            id,
             employeeId,
             date: todayISO(),
             oldSalary: structuredClone(emp.salary),
@@ -1293,6 +1530,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             status: "pending",
             requestedBy: me.id,
           });
+          pushActivity(
+            draft,
+            me,
+            "submitted",
+            "salary",
+            id,
+            `${emp.code} · ${emp.name}`,
+            `Salary revision proposed`
+          );
         });
         toast("Salary revision submitted for admin approval.");
       },
@@ -1307,40 +1553,98 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         mutate((draft) => {
           const rev = draft.salaryRevisions.find((r) => r.id === id);
           if (!rev || rev.status !== "pending") return;
+          const emp = draft.employees.find((e) => e.id === rev.employeeId);
           rev.status = approve ? "approved" : "rejected";
           rev.decidedBy = actor.id;
           rev.decidedAt = new Date().toISOString();
-          if (approve) {
-            const emp = draft.employees.find((e) => e.id === rev.employeeId);
-            if (emp) emp.salary = structuredClone(rev.newSalary);
-          }
+          if (approve && emp) emp.salary = structuredClone(rev.newSalary);
+          pushActivity(
+            draft,
+            actor,
+            approve ? "approved" : "rejected",
+            "salary",
+            id,
+            `${emp?.code ?? ""} · ${emp?.name ?? "Employee"}`.trim(),
+            `Revision ${approve ? "applied — effective next payroll" : "rejected"}`
+          );
         });
         toast(approve ? "Salary revision approved — effective next payroll." : "Revision rejected.");
       },
 
       /* ---------------- projects & tasks ---------------- */
       addProject(input) {
+        if (!me) return;
         const code = nextCode("PRJ", db.projects.map((p) => p.code));
+        const id = uid("prj");
         mutate((draft) => {
           draft.projects.unshift({
             ...input,
-            id: uid("prj"),
+            id,
             code,
             createdAt: new Date().toISOString(),
           });
+          pushActivity(draft, me, "created", "projects", id, `${code} · ${input.name}`);
         });
         toast(`${input.name} created (${code}).`);
       },
 
       updateProject(id, patch) {
+        if (!me) return;
         mutate((draft) => {
           const p = draft.projects.find((x) => x.id === id);
-          if (p) Object.assign(p, patch);
+          if (!p) return;
+          const changes = Object.entries(patch)
+            .filter(([key, value]) => (p as unknown as Record<string, unknown>)[key] !== value)
+            .map(([key]) => key);
+          Object.assign(p, patch);
+          if (changes.length)
+            pushActivity(
+              draft,
+              me,
+              "updated",
+              "projects",
+              id,
+              `${p.code} · ${p.name}`,
+              `Updated ${changes.join(", ")}`
+            );
         });
         toast("Project updated.");
       },
 
+      deleteProject(id) {
+        const actor = requireUser();
+        if (!actor) return;
+        if (!canDeleteRecord(actor.role, "project")) {
+          toast("Your role can't delete projects.", "error");
+          return;
+        }
+        const project = db.projects.find((p) => p.id === id);
+        if (!project) return;
+        const taskCount = db.tasks.filter((t) => t.projectId === id).length;
+        if (taskCount > 0) {
+          toast(
+            `This project still has ${taskCount} task${taskCount > 1 ? "s" : ""}. Reassign or complete them first.`,
+            "error"
+          );
+          return;
+        }
+        mutate((draft) => {
+          draft.projects = draft.projects.filter((p) => p.id !== id);
+          draft.timesheets = draft.timesheets.filter((t) => t.projectId !== id);
+          pushActivity(
+            draft,
+            actor,
+            "deleted",
+            "projects",
+            id,
+            `${project.code} · ${project.name}`
+          );
+        });
+        toast(`Project ${project.code} deleted.`);
+      },
+
       addTask(input) {
+        if (!me) return;
         if (!input.title.trim()) {
           toast("Task needs a title.", "error");
           return;
@@ -1364,16 +1668,69 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             createdBy: me?.id ?? "system",
             createdAt: new Date().toISOString(),
           });
+          pushActivity(
+            draft,
+            me,
+            "created",
+            "tasks",
+            id,
+            `${code} · ${input.title.trim()}`,
+            input.assigneeIds.length
+              ? `Assigned to ${input.assigneeIds
+                  .map((aid) => draft.employees.find((e) => e.id === aid)?.name ?? "member")
+                  .join(", ")}`
+              : "Unassigned"
+          );
         });
         toast(`Task ${code} created and assigned.`);
       },
 
       updateTask(id, patch) {
+        if (!me) return;
         mutate((draft) => {
           const t = draft.tasks.find((x) => x.id === id);
-          if (t) Object.assign(t, patch);
+          if (!t) return;
+          const changes = Object.entries(patch)
+            .filter(([key, value]) => (t as unknown as Record<string, unknown>)[key] !== value)
+            .map(([key]) => key);
+          Object.assign(t, patch);
+          if (changes.length)
+            pushActivity(
+              draft,
+              me,
+              "updated",
+              "tasks",
+              id,
+              `${t.code} · ${t.title}`,
+              `Updated ${changes.join(", ")}`
+            );
         });
         toast("Task updated.");
+      },
+
+      deleteTask(id) {
+        const actor = requireUser();
+        if (!actor) return;
+        if (!canDeleteRecord(actor.role, "task")) {
+          toast("Only managers, HR and admins can delete tasks.", "error");
+          return;
+        }
+        const task = db.tasks.find((t) => t.id === id);
+        if (!task) return;
+        mutate((draft) => {
+          draft.tasks = draft.tasks.filter((t) => t.id !== id);
+          draft.timesheets = draft.timesheets.filter((t) => t.taskId !== id);
+          pushActivity(
+            draft,
+            actor,
+            "deleted",
+            "tasks",
+            id,
+            `${task.code} · ${task.title}`,
+            "Task and its timesheet entries removed"
+          );
+        });
+        toast(`Task ${task.code} deleted.`);
       },
 
       setTaskStatus(id, status) {
@@ -1386,9 +1743,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (status === "approved") {
             t.approvedBy = me.id;
             t.completedAt = t.completedAt ?? new Date().toISOString();
-          }
-          if (status === "completed") {
+            pushActivity(draft, me, "approved", "tasks", id, `${t.code} · ${t.title}`);
+          } else if (status === "revision") {
+            pushActivity(draft, me, "rejected", "tasks", id, `${t.code} · ${t.title}`, "Sent back for revision");
+          } else if (status === "completed") {
             t.completedAt = t.completedAt ?? new Date().toISOString();
+            pushActivity(draft, me, "updated", "tasks", id, `${t.code} · ${t.title}`, "Marked complete");
+          } else {
+            pushActivity(draft, me, "updated", "tasks", id, `${t.code} · ${t.title}`, `Moved to ${status.replace("-", " ")}`);
           }
         });
         toast(`Task moved to ${status.replace("-", " ")}.`);
@@ -1436,9 +1798,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           toast("Describe the work done.", "error");
           return false;
         }
+        const id = uid("ts");
         mutate((draft) => {
           draft.timesheets.unshift({
-            id: uid("ts"),
+            id,
             employeeId: emp.id,
             projectId: input.projectId,
             taskId: input.taskId,
@@ -1448,13 +1811,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             hours,
             description: input.description.trim(),
             status: "pending",
-            overtime: hours > db.settings.payroll.standardHours,
+            overtime: hours > draft.settings.payroll.standardHours,
           });
           /* auto-move assigned tasks to in progress */
           const task = draft.tasks.find((t) => t.id === input.taskId);
           if (task && ["created", "assigned", "accepted"].includes(task.status)) {
             task.status = "in-progress";
           }
+          pushActivity(
+            draft,
+            emp,
+            "submitted",
+            "timesheets",
+            id,
+            `Timesheet · ${hours}h`,
+            task?.title ?? input.description.trim()
+          );
         });
         toast(`Timesheet logged — ${hours}h sent to your manager.`);
         return true;
@@ -1466,9 +1838,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         mutate((draft) => {
           const ts = draft.timesheets.find((t) => t.id === id);
           if (!ts || ts.status !== "pending") return;
+          const task = draft.tasks.find((t) => t.id === ts.taskId);
           ts.status = approve ? "approved" : "rejected";
           ts.approverId = actor.id;
           ts.decidedAt = new Date().toISOString();
+          pushActivity(
+            draft,
+            actor,
+            approve ? "approved" : "rejected",
+            "timesheets",
+            id,
+            `Timesheet · ${ts.hours}h`,
+            `${draft.employees.find((e) => e.id === ts.employeeId)?.name ?? ""}${task ? ` · ${task.title}` : ""}`.trim()
+          );
         });
         toast(approve ? "Timesheet approved." : "Timesheet rejected.");
       },
@@ -1477,6 +1859,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       generatePayroll(month) {
         const actor = requireUser();
         if (!actor) return;
+        if (!["admin", "hr"].includes(actor.role)) {
+          toast("Only HR or an administrator can generate payroll.", "error");
+          return;
+        }
         if (db.payrollRuns.some((r) => r.month === month)) {
           toast(`Payroll for ${monthLabel(month)} already exists.`, "error");
           return;
@@ -1488,9 +1874,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const lines = eligible.map((emp) =>
           computePayrollLine(emp, month, db.attendance, db.tasks, db.settings)
         );
+        const id = uid("pr");
         mutate((draft) => {
           const run: PayrollRun = {
-            id: uid("pr"),
+            id,
             month,
             status: "draft",
             createdAt: new Date().toISOString(),
@@ -1505,6 +1892,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ],
           };
           draft.payrollRuns.unshift(run);
+          pushActivity(
+            draft,
+            actor,
+            "created",
+            "payroll",
+            id,
+            `Payroll · ${monthLabel(month)}`,
+            `${lines.length} employees · draft`
+          );
         });
         toast(`Payroll generated for ${monthLabel(month)} — ${lines.length} employees.`);
       },
@@ -1512,20 +1908,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       payrollTransition(runId, action) {
         const actor = requireUser();
         if (!actor) return;
-        const run = db.payrollRuns.find((r) => r.id === runId);
-        if (!run) return;
-        const isAdmin = actor.role === "admin";
-        const isHr = actor.role === "hr";
-        const isFinance = actor.role === "finance";
-        const stageRoleOk =
-          (action === "hr" && (isHr || isAdmin)) ||
-          (action === "finance" && (isFinance || isAdmin)) ||
-          (action === "approve" && isAdmin) ||
-          (action === "pay" && (isFinance || isAdmin));
-        if (!stageRoleOk) {
+        if (!payrollStageRole(actor.role, action)) {
           toast("Your role can't perform this payroll step.", "error");
           return;
         }
+        const run = db.payrollRuns.find((r) => r.id === runId);
+        if (!run) return;
         const requiredStatus =
           action === "hr"
             ? "draft"
@@ -1551,6 +1939,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               action: "Payments processed — salaries marked paid",
               at: new Date().toISOString(),
             });
+            pushActivity(
+              draft,
+              actor,
+              "approved",
+              "payroll",
+              runId,
+              `Payroll · ${monthLabel(target.month)}`,
+              "Payments processed — salaries marked paid"
+            );
             const total = target.lines.reduce((s, l) => s + l.net, 0);
             const bank = draft.accounts.find((a) => a.type === "bank") ?? draft.accounts[0];
             const code = nextCode("EXP", draft.expenses.map((e) => e.code));
@@ -1595,6 +1992,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             action: labels[action],
             at: new Date().toISOString(),
           });
+          pushActivity(
+            draft,
+            actor,
+            "approved",
+            "payroll",
+            runId,
+            `Payroll · ${monthLabel(target.month)}`,
+            labels[action]
+          );
         });
         toast(labels[action] + ".");
       },
@@ -1636,10 +2042,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           toast("Add a description for the expense.", "error");
           return false;
         }
+        const id = uid("exp");
         mutate((draft) => {
+          const code = nextCode("EXP", draft.expenses.map((e) => e.code));
           draft.expenses.unshift({
-            id: uid("exp"),
-            code: nextCode("EXP", draft.expenses.map((e) => e.code)),
+            id,
+            code,
             employeeId: emp.id,
             category: input.category,
             amount: Math.round(input.amount),
@@ -1657,6 +2065,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               },
             ],
           });
+          pushActivity(
+            draft,
+            emp,
+            "submitted",
+            "expenses",
+            id,
+            `${code} · ${input.description.trim()}`,
+            `₹${Math.round(input.amount).toLocaleString("en-IN")}`
+          );
         });
         toast("Expense submitted — routed for approval.");
         return true;
@@ -1687,6 +2104,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             at: new Date().toISOString(),
             note,
           });
+          pushActivity(
+            draft,
+            actor,
+            approve ? "approved" : "rejected",
+            "expenses",
+            id,
+            `${target.code} · ${target.description}`,
+            note
+          );
         });
         toast(approve ? "Expense approved — ready for payment." : "Expense rejected.");
       },
@@ -1710,8 +2136,44 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             action: "payment recorded",
             at: new Date().toISOString(),
           });
+          pushActivity(
+            draft,
+            actor,
+            "approved",
+            "expenses",
+            id,
+            `${exp.code} · ${exp.description}`,
+            "Payment recorded"
+          );
         });
         toast("Payment recorded — account balance updated.");
+      },
+
+      deleteExpense(id) {
+        const actor = requireUser();
+        if (!actor) return;
+        if (!canDeleteRecord(actor.role, "expense")) {
+          toast("Only HR, finance or an administrator can delete expenses.", "error");
+          return;
+        }
+        const exp = db.expenses.find((e) => e.id === id);
+        if (!exp) return;
+        if (exp.status === "paid") {
+          toast("Paid expenses are part of the books and can't be deleted.", "error");
+          return;
+        }
+        mutate((draft) => {
+          draft.expenses = draft.expenses.filter((e) => e.id !== id);
+          pushActivity(
+            draft,
+            actor,
+            "deleted",
+            "expenses",
+            id,
+            `${exp.code} · ${exp.description}`
+          );
+        });
+        toast(`Expense ${exp.code} deleted.`);
       },
 
       addIncome(input) {
@@ -1721,10 +2183,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           toast("Enter a source and amount.", "error");
           return;
         }
+        const id = uid("inc");
         mutate((draft) => {
+          const code = nextCode("INC", draft.incomes.map((i) => i.code));
           draft.incomes.unshift({
-            id: uid("inc"),
-            code: nextCode("INC", draft.incomes.map((i) => i.code)),
+            id,
+            code,
             source: input.source.trim(),
             category: input.category,
             amount: Math.round(input.amount),
@@ -1733,14 +2197,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             projectId: input.projectId,
             reference: input.reference.trim() || "—",
           });
+          pushActivity(
+            draft,
+            emp,
+            "created",
+            "income",
+            id,
+            `${code} · ${input.source.trim()}`,
+            `₹${Math.round(input.amount).toLocaleString("en-IN")}`
+          );
         });
         toast("Income recorded.");
       },
 
       updateAccountOpening(id, amount) {
+        if (!me) return;
         mutate((draft) => {
           const acc = draft.accounts.find((a) => a.id === id);
-          if (acc) acc.openingBalance = amount;
+          if (!acc) return;
+          acc.openingBalance = amount;
+          pushActivity(
+            draft,
+            me,
+            "updated",
+            "finance",
+            id,
+            acc.name,
+            "Opening balance updated"
+          );
         });
         toast("Opening balance updated.");
       },
@@ -1749,11 +2233,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addAsset(input) {
         const actor = requireUser();
         if (!actor) return;
+        const id = uid("ast");
         mutate((draft) => {
+          const code = nextCode("AST", draft.assets.map((a) => a.code));
           draft.assets.unshift({
             ...input,
-            id: uid("ast"),
-            code: nextCode("AST", draft.assets.map((a) => a.code)),
+            id,
+            code,
             status: "available",
             history: [
               {
@@ -1763,6 +2249,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               },
             ],
           });
+          pushActivity(draft, actor, "created", "assets", id, `${code} · ${input.name}`);
         });
         toast("Asset added to inventory.");
       },
@@ -1783,6 +2270,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             action: `Assigned to ${emp.name}`,
             by: actor.id,
           });
+          pushActivity(draft, actor, "updated", "assets", assetId, `${asset.code} · ${asset.name}`, `Assigned to ${emp.name}`);
         });
         toast(`Asset assigned to ${emp.name}.`);
       },
@@ -1802,6 +2290,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             action: `Returned${prev ? ` by ${prev.name}` : ""} — available again`,
             by: actor.id,
           });
+          pushActivity(draft, actor, "updated", "assets", assetId, `${asset.code} · ${asset.name}`, "Returned to inventory");
         });
         toast("Asset returned to inventory.");
       },
@@ -1818,6 +2307,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             action: `Sent for maintenance${note ? ` — ${note}` : ""}`,
             by: actor.id,
           });
+          pushActivity(draft, actor, "updated", "assets", assetId, `${asset.code} · ${asset.name}`, "Sent for maintenance");
         });
         toast("Asset moved to maintenance.");
       },
@@ -1834,6 +2324,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             action: "Maintenance complete — available",
             by: actor.id,
           });
+          pushActivity(draft, actor, "updated", "assets", assetId, `${asset.code} · ${asset.name}`, "Maintenance complete");
         });
         toast("Asset is available again.");
       },
@@ -1851,6 +2342,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             action: "Disposed / written off",
             by: actor.id,
           });
+          pushActivity(draft, actor, "deleted", "assets", assetId, `${asset.code} · ${asset.name}`, "Disposed / written off");
         });
         toast("Asset disposed and removed from circulation.");
       },
@@ -1863,9 +2355,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           toast("Document needs a name and file.", "error");
           return;
         }
+        const id = uid("doc");
         mutate((draft) => {
           draft.documents.unshift({
-            id: uid("doc"),
+            id,
             name: input.name.trim(),
             category: input.category,
             entityId: input.entityId,
@@ -1883,6 +2376,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               },
             ],
           });
+          pushActivity(draft, actor, "created", "documents", id, input.name.trim());
         });
         toast("Document added to the repository.");
       },
@@ -1901,40 +2395,66 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             at: new Date().toISOString(),
             by: actor.id,
           });
+          pushActivity(draft, actor, "updated", "documents", docId, doc.name, `Version ${nextVersion} uploaded`);
         });
         toast("New document version uploaded.");
       },
 
       updateDocumentAccess(docId, roles) {
+        if (!me) return;
         mutate((draft) => {
           const doc = draft.documents.find((d) => d.id === docId);
-          if (doc) doc.accessRoles = roles;
+          if (!doc) return;
+          doc.accessRoles = roles;
+          pushActivity(draft, me, "updated", "documents", docId, doc.name, "Access updated");
         });
         toast("Document access updated.");
       },
 
+      deleteDocument(docId) {
+        const actor = requireUser();
+        if (!actor) return;
+        if (!canDeleteRecord(actor.role, "document")) {
+          toast("Only HR, finance or an administrator can delete documents.", "error");
+          return;
+        }
+        const doc = db.documents.find((d) => d.id === docId);
+        if (!doc) return;
+        mutate((draft) => {
+          draft.documents = draft.documents.filter((d) => d.id !== docId);
+          pushActivity(draft, actor, "deleted", "documents", docId, doc.name);
+        });
+        toast(`Document “${doc.name}” deleted.`);
+      },
+
       /* ---------------- settings ---------------- */
       updateSettings(patch) {
+        if (!me) return;
         mutate((draft) => {
           draft.settings = mergeSettings(draft.settings, patch);
+          pushActivity(draft, me, "updated", "settings", "settings", "Workspace settings");
         });
         toast("Settings saved.");
       },
 
       addHoliday(date, name) {
-        if (!date || !name.trim()) return;
+        if (!date || !name.trim() || !me) return;
         mutate((draft) => {
           if (!draft.settings.holidays.some((h) => h.date === date)) {
             draft.settings.holidays.push({ date, name: name.trim() });
             draft.settings.holidays.sort((a, b) => a.date.localeCompare(b.date));
+            pushActivity(draft, me, "created", "settings", `holiday:${date}`, `Holiday · ${name.trim()}`);
           }
         });
         toast("Holiday added to the calendar.");
       },
 
       removeHoliday(date) {
+        if (!me) return;
         mutate((draft) => {
+          const holiday = draft.settings.holidays.find((h) => h.date === date);
           draft.settings.holidays = draft.settings.holidays.filter((h) => h.date !== date);
+          if (holiday) pushActivity(draft, me, "deleted", "settings", `holiday:${date}`, `Holiday · ${holiday.name}`);
         });
         toast("Holiday removed.");
       },
@@ -1961,6 +2481,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         user,
         actions,
         toasts,
+        toast,
         authMode,
         authReady,
         authError,

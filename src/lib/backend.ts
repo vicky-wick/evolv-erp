@@ -45,7 +45,8 @@ export type CollectionKey =
   | "accounts"
   | "assets"
   | "documents"
-  | "salaryRevisions";
+  | "salaryRevisions"
+  | "activity";
 
 export const SPECS: Record<CollectionKey, Spec> = {
   employees: {
@@ -292,6 +293,21 @@ export const SPECS: Record<CollectionKey, Spec> = {
       { key: "decidedAt", col: "decided_at", opt: true },
     ],
   },
+  activity: {
+    table: "activity_log",
+    cols: [
+      { key: "id", col: "id" },
+      { key: "at", col: "at" },
+      { key: "actorId", col: "actor_id" },
+      { key: "actorRole", col: "actor_role" },
+      { key: "actorName", col: "actor_name" },
+      { key: "action", col: "action" },
+      { key: "entity", col: "entity" },
+      { key: "entityId", col: "entity_id" },
+      { key: "label", col: "label" },
+      { key: "detail", col: "detail", opt: true },
+    ],
+  },
 };
 
 export const COLLECTION_KEYS = Object.keys(SPECS) as CollectionKey[];
@@ -415,7 +431,11 @@ export async function fetchOrgDB(
   const results = await Promise.all(
     COLLECTION_KEYS.map(async (key) => {
       const spec = SPECS[key];
-      const res = await client.from(spec.table).select(selectList(spec)).eq("org_id", orgId);
+      let query = client.from(spec.table).select(selectList(spec)).eq("org_id", orgId);
+      /* The activity log is append-only and grows forever — fetch the
+         most recent slice only. */
+      if (key === "activity") query = query.order("at", { ascending: false }).limit(400);
+      const res = await query;
       if (res.error) throw new Error(res.error.message);
       return [key, ((res.data ?? []) as unknown as Row[]).map((row) => fromRow(row, spec))] as const;
     })
@@ -555,6 +575,39 @@ export async function syncDiff(
   );
 
   return { snapshot: nextSnapshot, upserts, deletes };
+}
+
+/* ---------------- employee join flow ---------------- */
+
+export interface JoinableOrg {
+  org_id: string;
+  org_name: string;
+  employee_name: string;
+}
+
+/**
+ * Workspaces that hold an active employee record for `email` which the
+ * current auth user has not joined yet. Backed by the
+ * `joinable_orgs_for_email` SECURITY DEFINER function, because a user
+ * without membership cannot read the employees table directly.
+ */
+export async function fetchJoinableOrgs(
+  client: SupabaseClient,
+  email: string
+): Promise<JoinableOrg[]> {
+  const { data, error } = await client.rpc("joinable_orgs_for_email", { p_email: email });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as JoinableOrg[];
+}
+
+/** Link the current auth user to an organization as a member. */
+export async function joinOrganization(
+  client: SupabaseClient,
+  userId: string,
+  orgId: string
+): Promise<void> {
+  const res = await client.from("org_members").insert({ user_id: userId, org_id: orgId });
+  if (res.error) throw new Error(res.error.message);
 }
 
 /* ---------------- org provisioning ---------------- */

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Building2,
   CalendarDays,
@@ -13,13 +13,16 @@ import {
   Users,
 } from "lucide-react";
 import { useStore } from "../data/store";
-import { Badge, Field, PageHeader, Stat, Tabs } from "../components/ui";
-import type { LeavePolicy } from "../types";
-import { currency, fmtDate, todayISO } from "../lib/format";
+import { Avatar, Badge, Field, PageHeader, Stat, Tabs } from "../components/ui";
+import type { ActivityAction, LeavePolicy, Role } from "../types";
+import { ROLE_INFO, ROLE_LABEL, ROLE_ORDER, canAssignRole } from "../lib/permissions";
+import { currency, fmtDate, fmtDateTime, relativeTime, todayISO } from "../lib/format";
 
 export default function Settings() {
   const { db, user, actions, authMode, syncState } = useStore();
+  const isAdmin = user?.role === "admin";
   const [tab, setTab] = useState("org");
+  const [activityFilter, setActivityFilter] = useState<"all" | ActivityAction>("all");
 
   const [org, setOrg] = useState({ ...db.settings.org });
   const [payroll, setPayroll] = useState({ ...db.settings.payroll });
@@ -35,6 +38,12 @@ export default function Settings() {
   const monthlyPayroll = db.employees
     .filter((e) => e.status !== "exited")
     .reduce((s, e) => s + e.salary.basic + e.salary.hra + e.salary.allowances, 0);
+  const adminCount = db.employees.filter((e) => e.role === "admin" && e.status !== "exited").length;
+
+  const activity = useMemo(() => {
+    const rows = activityFilter === "all" ? db.activity : db.activity.filter((a) => a.action === activityFilter);
+    return rows.slice(0, 120);
+  }, [db.activity, activityFilter]);
 
   const downloadBackup = () => {
     const blob = new Blob([JSON.stringify(db, null, 2)], { type: "application/json" });
@@ -65,15 +74,181 @@ export default function Settings() {
       <Tabs
         tabs={[
           { id: "org", label: "Organisation" },
+          { id: "team", label: "Team & roles" },
           { id: "payroll", label: "Payroll rules" },
           { id: "leave", label: "Leave policies" },
           { id: "approvals", label: "Approvals" },
           { id: "holidays", label: "Holidays", count: db.settings.holidays.length },
+          { id: "activity", label: "Activity log" },
           { id: "data", label: "Data" },
         ]}
         value={tab}
         onChange={setTab}
       />
+
+      {tab === "team" && (
+        <>
+          <section className="panel">
+            <div className="panel-head">
+              <h2>Roles, in plain language</h2>
+              <span className="panel-hint">Higher up the ladder can do everything below it</span>
+            </div>
+            <div className="role-ladder">
+              {(Object.keys(ROLE_INFO) as Role[])
+                .sort((a, b) => ROLE_ORDER[b] - ROLE_ORDER[a])
+                .map((role) => (
+                  <div className="role-ladder-row" key={role}>
+                    <span className={`role-dot role-${role}`} aria-hidden="true" />
+                    <div className="role-ladder-text">
+                      <strong>{ROLE_LABEL[role]}</strong>
+                      <small>{ROLE_INFO[role].detail}</small>
+                    </div>
+                  </div>
+                ))}
+            </div>
+            {isAdmin ? (
+              <p className="form-note">
+                You are an administrator — only admins can change roles below, and there must always
+                be at least one admin ({adminCount} right now).
+              </p>
+            ) : (
+              <p className="form-note">
+                Role changes can only be made by an administrator. You can view them here.
+              </p>
+            )}
+          </section>
+
+          <section className="panel">
+            <div className="panel-head">
+              <h2>People & their roles</h2>
+              <span className="panel-hint">{activeCount} active members</span>
+            </div>
+            <div className="table-wrap">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Member</th>
+                    <th>Department</th>
+                    <th>Current role</th>
+                    {isAdmin && <th>Change role</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {db.employees
+                    .filter((e) => e.status !== "exited")
+                    .map((e) => (
+                      <tr key={e.id}>
+                        <td>
+                          <div className="cell-user">
+                            <Avatar name={e.name} size={28} />
+                            <span>
+                              <strong>{e.name}</strong>
+                              <small>{e.designation}</small>
+                            </span>
+                          </div>
+                        </td>
+                        <td>{db.departments.find((d) => d.id === e.departmentId)?.name ?? "—"}</td>
+                        <td>
+                          <Badge tone={e.role === "admin" ? "violet" : "gray"}>
+                            {ROLE_LABEL[e.role]}
+                          </Badge>
+                        </td>
+                        {isAdmin && (
+                          <td>
+                            <select
+                              className="select select-sm"
+                              value={e.role}
+                              disabled={e.id === user.id}
+                              onChange={(ev) => {
+                                const next = ev.target.value as Role;
+                                const guard = canAssignRole(
+                                  user.role,
+                                  e.role,
+                                  next,
+                                  adminCount,
+                                  e.id === user.id
+                                );
+                                if (!guard.ok) {
+                                  window.alert(guard.reason);
+                                  return;
+                                }
+                                if (
+                                  !window.confirm(
+                                    `Make ${e.name} ${next === "admin" ? "an administrator" : `a ${ROLE_LABEL[next]}`}?`
+                                  )
+                                )
+                                  return;
+                                actions.setEmployeeRole(e.id, next);
+                              }}
+                            >
+                              {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
+                                <option key={r} value={r}>
+                                  {ROLE_LABEL[r]}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      )}
+
+      {tab === "activity" && (
+        <section className="panel">
+          <div className="panel-head">
+            <h2>Activity log</h2>
+            <span className="panel-hint">Who created, edited, approved or deleted what</span>
+          </div>
+          <div className="toolbar">
+            <select
+              className="select select-sm"
+              value={activityFilter}
+              onChange={(e) => setActivityFilter(e.target.value as typeof activityFilter)}
+            >
+              <option value="all">All actions</option>
+              {(["created", "updated", "submitted", "approved", "rejected", "deleted"] as ActivityAction[]).map(
+                (a) => (
+                  <option key={a} value={a}>
+                    {a[0].toUpperCase() + a.slice(1)}
+                  </option>
+                )
+              )}
+            </select>
+            <span className="toolbar-count">{activity.length} shown</span>
+          </div>
+          {activity.length === 0 ? (
+            <p className="panel-empty">No activity recorded yet — it fills up as people work.</p>
+          ) : (
+            <div className="activity-list">
+              {activity.map((a) => (
+                <div className="activity-row" key={a.id}>
+                  <Avatar name={a.actorName} size={26} />
+                  <div className="activity-main">
+                    <strong>
+                      <Badge tone={a.action === "deleted" ? "red" : a.action === "approved" ? "green" : a.action === "rejected" ? "red" : a.action === "submitted" ? "blue" : "gray"}>
+                        {a.action}
+                      </Badge>{" "}
+                      {a.label}
+                    </strong>
+                    <small>
+                      {a.actorName} ({ROLE_LABEL[a.actorRole] ?? a.actorRole}) · {a.entity}
+                      {a.detail ? ` · ${a.detail}` : ""}
+                    </small>
+                  </div>
+                  <span className="activity-time" title={fmtDateTime(a.at)}>
+                    {relativeTime(a.at)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {tab === "org" && (
         <section className="panel">

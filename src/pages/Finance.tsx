@@ -6,6 +6,7 @@ import {
   IndianRupee,
   Landmark,
   Plus,
+  Trash2,
   Wallet,
   X,
 } from "lucide-react";
@@ -22,6 +23,7 @@ import {
 } from "../components/ui";
 import { MonthlyChart } from "../components/charts";
 import type { ExpenseCategory } from "../types";
+import { canDeleteRecord } from "../lib/permissions";
 import {
   currency,
   currencyCompact,
@@ -307,8 +309,22 @@ export default function Finance() {
                             </>
                           )}
                           {isStaff && e.status === "approved" && (
-                            <button className="btn btn-primary btn-xs" onClick={() => { setPayFor(e.id); setPayAccount(db.accounts[0]?.id ?? "acc-bank"); }}>
+                            <button className="btn btn-primary btn-xs" onClick={() => { setPayFor(e.id); setPayAccount(db.accounts.find((a) => a.type === "bank")?.id ?? db.accounts[0]?.id ?? ""); }}>
                               Pay
+                            </button>
+                          )}
+                          {canDeleteRecord(user!.role, "expense") && e.status !== "paid" && (
+                            <button
+                              className="icon-btn"
+                              aria-label={`Delete ${e.code}`}
+                              title="Delete expense"
+                              onClick={() => {
+                                if (window.confirm(`Delete expense ${e.code}? This can't be undone.`)) {
+                                  actions.deleteExpense(e.id);
+                                }
+                              }}
+                            >
+                              <Trash2 size={13} />
                             </button>
                           )}
                           {e.status === "paid" && <span className="cell-muted">paid {e.paidAt ? fmtDate(e.paidAt.slice(0, 10)) : ""}</span>}
