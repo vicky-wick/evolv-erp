@@ -18,7 +18,6 @@ import {
   Field,
   Modal,
   PageHeader,
-  Stat,
   StatusBadge,
   Tabs,
 } from "../components/ui";
@@ -140,16 +139,11 @@ export default function Attendance() {
     <div className="page">
       <PageHeader
         title="Attendance & Leave"
-        subtitle={`${monthLabel(month)} · standard shift 09:30 – 18:30 · extra hours feed payroll incentives`}
+        subtitle={`${monthLabel(month)} · standard shift 09:30 – 18:30`}
         actions={
-          <>
-            <button className="btn btn-ghost btn-sm" onClick={() => setShowCorrection(true)}>
-              <Clock size={14} /> Correction
-            </button>
-            <button className="btn btn-primary btn-sm" onClick={() => setShowLeave(true)}>
-              <Plane size={14} /> Apply leave
-            </button>
-          </>
+          <button className="btn btn-primary btn-sm" onClick={() => setShowLeave(true)}>
+            <Plane size={14} /> Apply leave
+          </button>
         }
       />
 
@@ -215,22 +209,20 @@ export default function Attendance() {
 
       {tab === "my" && (
         <>
-          <div className="stat-grid">
-            <Stat label="Present days" value={monthSummary.present} sub={`${monthSummary.workingDays} working days`} />
-            <Stat label="Late arrivals" value={monthSummary.lateDays} sub="After 09:40 grace" />
-            <Stat label="Extra hours" value={`${Math.round((monthSummary.overtimeHours + monthSummary.weekendOvertimeHours) * 10) / 10}h`} sub="Overtime + weekend" />
-            <Stat label="Leave taken" value={`${monthSummary.paidLeaveDays + monthSummary.unpaidLeaveDays}d`} sub={`${monthSummary.unpaidLeaveDays}d unpaid`} />
-          </div>
-
-          <section className="panel">
-            <div className="panel-head">
-              <h2>Calendar</h2>
-              <select className="select select-sm" value={month} onChange={(e) => setMonth(e.target.value)}>
-                {listMonths(4).slice().reverse().map((m) => (
-                  <option key={m} value={m}>{monthLabel(m)}</option>
-                ))}
-              </select>
-            </div>
+          <div className="att-grid">
+            <section className="panel">
+              <div className="panel-head">
+                <h2>Calendar</h2>
+                <span className="panel-hint">
+                  {monthSummary.present}/{monthSummary.workingDays} present · {monthSummary.lateDays} late ·{" "}
+                  {Math.round((monthSummary.overtimeHours + monthSummary.weekendOvertimeHours) * 10) / 10}h OT
+                </span>
+                <select className="select select-sm" value={month} onChange={(e) => setMonth(e.target.value)}>
+                  {listMonths(4).slice().reverse().map((m) => (
+                    <option key={m} value={m}>{monthLabel(m)}</option>
+                  ))}
+                </select>
+              </div>
               <div className="cal-head">
                 {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
                   <span key={i}>{d}</span>
@@ -265,54 +257,45 @@ export default function Attendance() {
                 <span><i className="lg absent" /> Absent</span>
                 <span><i className="lg holiday" /> Holiday</span>
               </div>
-              <p className="form-note">
-                Overtime pays <b>{db.settings.payroll.otMultiplier}×</b>, weekend work{" "}
-                <b>{db.settings.payroll.weekendOtMultiplier}×</b> your hourly rate.
-              </p>
-          </section>
+            </section>
 
-          <section className="panel">
-            <div className="panel-head">
-              <h2>Attendance history</h2>
-              <span className="panel-hint">Latest 15 records</span>
-            </div>
-            <div className="table-wrap">
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>Date</th><th>Check in</th><th>Check out</th><th>Worked</th><th>Extra</th><th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
+            <section className="panel">
+              <div className="panel-head">
+                <h2>Attendance history</h2>
+                <button className="btn btn-ghost btn-sm" onClick={() => setShowCorrection(true)}><Plus size={14} /> New request</button>
+              </div>
+              {myAttendance.length === 0 ? (
+                <p className="panel-empty">No attendance recorded yet. Check in to start your first day.</p>
+              ) : (
+                <div className="list">
                   {[...myAttendance]
                     .sort((a, b) => b.date.localeCompare(a.date))
-                    .slice(0, 15)
+                    .slice(0, 6)
                     .map((rec) => {
                       const mins = workedMinutes(rec);
                       return (
-                        <tr key={rec.id}>
-                          <td>{fmtShortDate(rec.date)}</td>
-                          <td>{rec.checkIn ?? "—"}</td>
-                          <td>{rec.checkOut ?? "—"}</td>
-                          <td>{mins ? hoursLabel(mins) : "—"}</td>
-                          <td>{rec.overtimeMinutes ? <Badge tone="violet">{hoursLabel(rec.overtimeMinutes)}</Badge> : "—"}</td>
-                          <td><StatusBadge status={rec.status} /></td>
-                        </tr>
+                        <div className="list-row att-row" key={rec.id}>
+                          <div className="att-line">
+                            <strong>{fmtShortDate(rec.date)}</strong>
+                            <span>
+                              {rec.checkIn ?? "—"} → {rec.checkOut ?? (rec.checkIn ? "…" : "—")}
+                              {mins ? ` · ${hoursLabel(mins)}` : ""}
+                            </span>
+                          </div>
+                          <StatusBadge status={rec.status} />
+                        </div>
                       );
                     })}
-                </tbody>
-              </table>
-            </div>
-          </section>
+                </div>
+              )}
+            </section>
+          </div>
 
-          <section className="panel">
-            <div className="panel-head">
-              <h2>My correction requests</h2>
-              <button className="btn btn-ghost btn-sm" onClick={() => setShowCorrection(true)}><Plus size={14} /> New request</button>
-            </div>
-            {myCorrections.length === 0 ? (
-              <p className="panel-empty">No corrections requested. Raise one if your check-in or check-out is wrong.</p>
-            ) : (
+          {myCorrections.length > 0 && (
+            <section className="panel">
+              <div className="panel-head">
+                <h2>My correction requests</h2>
+              </div>
               <div className="list">
                 {myCorrections.map((c) => (
                   <div className="list-row" key={c.id}>
@@ -324,8 +307,8 @@ export default function Attendance() {
                   </div>
                 ))}
               </div>
-            )}
-          </section>
+            </section>
+          )}
         </>
       )}
 
